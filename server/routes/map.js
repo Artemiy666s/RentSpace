@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 const express = require('express');
 const { db } = require('../db');
 const { authenticate, requireRoles } = require('../middlewares/auth');
@@ -14,6 +15,21 @@ const { ok, fail } = require('../utils/response');
 const { MAP_EDIT_ROLES } = require('../constants/roles');
 
 const router = express.Router();
+const publicRouter = express.Router();
+
+const PLAN_META_COLUMNS = [
+  'id',
+  'floor_id',
+  'width',
+  'height',
+  'version',
+  'is_active',
+  'image_path',
+  'image_mime',
+  'original_file_name',
+  'created_at',
+  'updated_at',
+];
 
 router.use(authenticate, requireOrgAccess());
 
@@ -22,10 +38,52 @@ function planImageUrl(plan) {
   return `/uploads/${plan.image_path.replace(/^server\/uploads\/?/, '')}`;
 }
 
+function signPlanImageUrl(planId) {
+  const sig = jwt.sign(
+    { typ: 'floor_plan_img', planId: Number(planId) },
+    config.jwt.secret,
+    { expiresIn: '90d' }
+  );
+  return `/api/floor-plans/${planId}/image?sig=${encodeURIComponent(sig)}`;
+}
+
 function planImageHref(plan) {
   if (!plan) return null;
-  if (plan.image_blob) return `/api/floor-plans/${plan.id}/image`;
+  // Blob is stored in DB (Vercel-safe). Signed URL works in <img>/<svg> without Bearer header.
+  if (plan.image_mime) return signPlanImageUrl(plan.id);
   return planImageUrl(plan);
+}
+
+function toPublicPlan(plan) {
+  if (!plan) return null;
+  const meta = {};
+  for (const key of PLAN_META_COLUMNS) {
+    if (plan[key] !== undefined) meta[key] = plan[key];
+  }
+  return { ...meta, imageUrl: planImageHref(meta) };
+}
+
+function verifyPlanImageSig(sig, planId) {
+  const payload = jwt.verify(String(sig), config.jwt.secret);
+  if (payload.typ !== 'floor_plan_img' || Number(payload.planId) !== Number(planId)) {
+    throw new Error('invalid sig');
+  }
+}
+
+async function verifyPlanImageBearer(req, plan) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return false;
+  const token = header.slice(7);
+  const payload = jwt.verify(token, config.jwt.secret);
+  const user = await db('users').where({ id: payload.userId, status: 'active' }).first();
+  if (!user) return false;
+  const floor = await db('floors').where({ id: plan.floor_id }).first();
+  if (!floor) return false;
+  const building = await db('buildings').where({ id: floor.building_id }).first();
+  if (!building) return false;
+  const property = await db('properties').where({ id: building.property_id }).first();
+  if (!property || property.organization_id !== user.organization_id) return false;
+  return true;
 }
 
 function hasMissingColumnError(err) {
@@ -93,38 +151,53 @@ async function buildPlanPayload(plan, floorId) {
   }));
 
   return {
-    plan: { ...plan, imageUrl: planImageHref(plan) },
+    plan: toPublicPlan(plan),
     shapes,
     rooms,
     floorRooms: floorRoomsMeta,
   };
 }
 
-router.get(
-  '/floor-plans/:floorPlanId/image',
-  asyncHandler(async (req, res) => {
-    const planId = Number(req.params.floorPlanId);
-    const plan = await db('floor_plans').where({ id: planId, is_active: true }).first();
-    if (!plan) return fail(res, 'План не найден', 404);
+async function serveFloorPlanImage(req, res) {
+  const planId = Number(req.params.floorPlanId);
+  const plan = await db('floor_plans').where({ id: planId, is_active: true }).first();
+  if (!plan) return fail(res, 'План не найден', 404);
 
-    // Prefer DB blob (works on Vercel where uploads dir is ephemeral)
-    if (plan.image_blob) {
-      const mime = plan.image_mime || 'image/png';
-      res.setHeader('Content-Type', mime);
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      return res.end(plan.image_blob);
+  const sig = req.query.sig;
+  if (sig) {
+    try {
+      verifyPlanImageSig(sig, planId);
+    } catch {
+      return fail(res, 'Недействительная ссылка на изображение', 401);
     }
+  } else {
+    try {
+      const allowed = await verifyPlanImageBearer(req, plan);
+      if (!allowed) return fail(res, 'Требуется авторизация', 401);
+    } catch {
+      return fail(res, 'Требуется авторизация', 401);
+    }
+  }
 
-    // Fallback to file on disk (self-hosted / dev)
-    if (!plan.image_path) return fail(res, 'Изображение плана отсутствует', 404);
-    const uploadRoot = path.isAbsolute(config.upload.dir)
-      ? config.upload.dir
-      : path.join(process.cwd(), config.upload.dir);
-    const abs = path.join(uploadRoot, plan.image_path);
-    if (!fs.existsSync(abs)) return fail(res, 'Файл плана не найден', 404);
-    return res.sendFile(abs);
-  })
-);
+  // Prefer DB blob (works on Vercel where uploads dir is ephemeral)
+  if (plan.image_blob) {
+    const mime = plan.image_mime || 'image/png';
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.end(plan.image_blob);
+  }
+
+  // Fallback to file on disk (self-hosted / dev)
+  if (!plan.image_path) return fail(res, 'Изображение плана отсутствует', 404);
+  const uploadRoot = path.isAbsolute(config.upload.dir)
+    ? config.upload.dir
+    : path.join(process.cwd(), config.upload.dir);
+  const abs = path.join(uploadRoot, plan.image_path);
+  if (!fs.existsSync(abs)) return fail(res, 'Файл плана не найден', 404);
+  return res.sendFile(abs);
+}
+
+publicRouter.get('/floor-plans/:floorPlanId/image', asyncHandler(serveFloorPlanImage));
 
 router.get(
   '/floors/:floorId/plan',
@@ -184,8 +257,8 @@ router.post(
         delete fallbackUpd.image_mime;
         await db('floor_plans').where({ id: existing.id }).update(fallbackUpd);
       }
-      const plan = await db('floor_plans').where({ id: existing.id }).first();
-      return ok(res, { ...plan, imageUrl: planImageHref(plan) });
+      const plan = await db('floor_plans').where({ id: existing.id }).select(PLAN_META_COLUMNS).first();
+      return ok(res, toPublicPlan(plan));
     }
 
     const prevCount = await db('floor_plans').where({ floor_id: floorId }).count('id as c').first();
@@ -239,8 +312,8 @@ router.patch(
     if (req.body.height != null) upd.height = Number(req.body.height);
 
     await db('floor_plans').where({ id: plan.id }).update(upd);
-    const updated = await db('floor_plans').where({ id: plan.id }).first();
-    ok(res, { ...updated, imageUrl: planImageHref(updated) });
+    const updated = await db('floor_plans').where({ id: plan.id }).select(PLAN_META_COLUMNS).first();
+    ok(res, toPublicPlan(updated));
   })
 );
 
@@ -327,3 +400,4 @@ router.delete(
 );
 
 module.exports = router;
+module.exports.publicRouter = publicRouter;

@@ -20,6 +20,7 @@ const router = express.Router();
 router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/', propertiesRoutes);
+router.use('/', mapRoutes.publicRouter);
 router.use('/', mapRoutes);
 router.use('/rooms', roomsRoutes);
 router.use('/tenants', tenantsRoutes);

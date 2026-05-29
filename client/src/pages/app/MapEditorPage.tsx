@@ -287,9 +287,10 @@ export function MapEditorPage() {
     },
     onSuccess: () => {
       invalidate();
-      setStep('draw');
       setUploadPreview(null);
       setPendingPlanFile(null);
+      showFeedback('success', t('mapEditor.planSaved'));
+      setStep('draw');
     },
     onError: (err) => {
       showFeedback('error', getApiErrorMessage(err, t('mapEditor.saveFailed')));

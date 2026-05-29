@@ -456,6 +456,7 @@ export const en: TranslationTree = {
     tip3: 'Enter unit number (or pick from list) and click “Finish”.',
     tip4: 'To edit: select unit → “Edit points” → save.',
     selectFromList: 'Pick a unit from the list below or create one with a unique number.',
+    planSaved: 'Floor plan underlay saved',
     contourSaved: 'Contour saved',
     contourUpdated: 'Contour updated',
     contourDeleted: 'Contour deleted',
