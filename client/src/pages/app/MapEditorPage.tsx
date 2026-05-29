@@ -748,6 +748,14 @@ export function MapEditorPage() {
                   </div>
                 </>
               )}
+              {feedback && (
+                <div
+                  className={feedback.type === 'error' ? styles.alert : styles.planMeta}
+                  role={feedback.type === 'error' ? 'alert' : undefined}
+                >
+                  {feedback.text}
+                </div>
+              )}
               {uploadPlan.isPending && <p className={styles.planMeta}>{t('common.loading')}</p>}
               {plan?.imageUrl && (
                 <>

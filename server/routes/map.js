@@ -28,6 +28,12 @@ function planImageHref(plan) {
   return planImageUrl(plan);
 }
 
+function hasMissingColumnError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '');
+  return err.code === 'ER_BAD_FIELD_ERROR' || msg.includes('Unknown column');
+}
+
 function parsePointsJson(raw) {
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
@@ -168,7 +174,16 @@ router.post(
       } else if (!req.body.keepPlan) {
         return fail(res, 'Загрузите изображение плана', 400);
       }
-      await db('floor_plans').where({ id: existing.id }).update(upd);
+      try {
+        await db('floor_plans').where({ id: existing.id }).update(upd);
+      } catch (err) {
+        if (!hasMissingColumnError(err)) throw err;
+        // DB migration may lag behind deployment: retry without blob columns.
+        const fallbackUpd = { ...upd };
+        delete fallbackUpd.image_blob;
+        delete fallbackUpd.image_mime;
+        await db('floor_plans').where({ id: existing.id }).update(fallbackUpd);
+      }
       const plan = await db('floor_plans').where({ id: existing.id }).first();
       return ok(res, { ...plan, imageUrl: planImageHref(plan) });
     }
@@ -197,7 +212,16 @@ router.post(
       return fail(res, 'Загрузите изображение плана', 400);
     }
 
-    const [id] = await db('floor_plans').insert(payload);
+    let id;
+    try {
+      [id] = await db('floor_plans').insert(payload);
+    } catch (err) {
+      if (!hasMissingColumnError(err)) throw err;
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.image_blob;
+      delete fallbackPayload.image_mime;
+      [id] = await db('floor_plans').insert(fallbackPayload);
+    }
     const plan = await db('floor_plans').where({ id }).first();
     ok(res, { ...plan, imageUrl: planImageHref(plan) }, 201);
   })
