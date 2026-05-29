@@ -1,4 +1,7 @@
 .wrap {
   min-height: 100vh;
-  min-width: 1280px;
+  min-height: 100dvh;
+  min-width: 0;
+  width: 100%;
+  overflow-x: hidden;
 }

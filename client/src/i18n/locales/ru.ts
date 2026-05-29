@@ -17,6 +17,7 @@ export const ru: TranslationTree = {
   common: {
     save: 'Сохранить',
     saving: 'Сохранение…',
+    preview: 'Предпросмотр',
     loading: 'Загрузка…',
     noData: 'Нет данных',
     cancel: 'Отмена',
@@ -56,6 +57,9 @@ export const ru: TranslationTree = {
     roomNo: '№{{no}}',
     expandSidebar: 'Развернуть сайдбар',
     collapseSidebar: 'Свернуть сайдбар',
+    openMenu: 'Открыть меню',
+    closeMenu: 'Закрыть меню',
+    backToList: 'К списку',
     logout: 'Выйти',
     personalAccount: 'Личный кабинет',
     appName: 'RentSpace.by',
@@ -298,6 +302,8 @@ export const ru: TranslationTree = {
     reports: 'Отчёты',
     settings: 'Настройки',
     mapEditor: 'Редактор карт',
+    more: 'Ещё',
+    mobileMain: 'Основная навигация',
   },
   roles: {
     manager: 'Заведущая',

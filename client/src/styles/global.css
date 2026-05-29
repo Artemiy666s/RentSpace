@@ -1,5 +1,7 @@
 @import './variables.css';
 @import './controls.css';
+@import './responsive.css';
+@import './mobile-app.css';
 
 *,
 *::before,
@@ -19,6 +21,16 @@ body {
   color: var(--color-text);
   background: linear-gradient(160deg, var(--color-bg-start) 0%, var(--color-bg-end) 100%);
   -webkit-font-smoothing: antialiased;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+@media (max-width: 900px) {
+  button,
+  a.navLink,
+  [role='button'] {
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 a {

@@ -49,3 +49,38 @@
 .body {
   padding: 24px;
 }
+
+@media (max-width: 900px) {
+  .overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .dialog {
+    max-width: none;
+    width: 100%;
+    max-height: min(92dvh, 100%);
+    border-radius: 20px 20px 0 0;
+    margin: 0;
+  }
+
+  .wide {
+    max-width: none;
+  }
+
+  .header {
+    padding: 16px 18px;
+  }
+
+  .body {
+    padding: 18px;
+    padding-bottom: calc(18px + var(--safe-bottom));
+  }
+}
+
+@media (max-width: 600px) {
+  .dialog {
+    max-height: 96dvh;
+    border-radius: 16px 16px 0 0;
+  }
+}

@@ -9,6 +9,8 @@
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 28px;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .header h1 {
@@ -310,6 +312,52 @@
 @media (max-width: 960px) {
   .dashboardGrid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .header h1 {
+    font-size: 22px;
+  }
+
+  .chartsGridItem.sortableBlock {
+    width: min(320px, 85vw);
+  }
+
+  .quickActionsItem.sortableBlock {
+    width: min(140px, 38vw);
+  }
+
+  .contractRow {
+    grid-template-columns: 1fr !important;
+    gap: 4px;
+  }
+
+  .kpiValue {
+    font-size: 24px;
+  }
+
+  .chartCard {
+    padding: 16px;
+    min-height: 260px;
+  }
+}
+
+@media (max-width: 600px) {
+  .header h1 {
+    font-size: 20px;
+  }
+
+  .chartsGridItem.sortableBlock {
+    width: min(280px, 88vw);
+  }
+
+  .quickActionsItem .actionCard {
+    height: 112px;
+    min-height: 112px;
+    max-height: 112px;
+    padding: 14px 10px;
+    font-size: 13px;
   }
 }
 

@@ -166,3 +166,69 @@
   font-weight: 600;
   margin-bottom: 6px;
 }
+
+@media (max-width: 900px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar h1 {
+    font-size: 22px;
+  }
+
+  .selectors {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .selectors select,
+  .select {
+    min-width: 0;
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .search {
+    width: 100%;
+  }
+
+  .search input {
+    min-width: 0;
+    flex: 1;
+    width: 100%;
+  }
+
+  .viewToggle {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .viewToggle button {
+    flex: 1;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mapCard {
+    min-height: min(420px, 55vh);
+  }
+
+  .metrics {
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 600px) {
+  .selectors select,
+  .select {
+    flex: 1 1 100%;
+  }
+
+  .mapCard {
+    min-height: min(360px, 50vh);
+  }
+}

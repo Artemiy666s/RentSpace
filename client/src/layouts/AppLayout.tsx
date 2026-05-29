@@ -1,59 +1,36 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Map,
-  Building2,
-  Users,
-  CreditCard,
-  FileText,
-  BarChart3,
-  Settings,
   LogOut,
-  ClipboardList,
-  Table2,
-  Receipt,
-  TrendingUp,
-  Wallet,
-  CalendarCheck,
-  Database,
   ChevronLeft,
   ChevronRight,
+  X,
+  LayoutGrid,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { usePreferencesStore } from '@/store/preferencesStore';
 import { getMainBackgroundStyle, isDarkWallpaper } from '@/constants/appBackgrounds';
 import { useEffectiveAppBackgroundId } from '@/hooks/useEffectiveAppBackground';
+import { useStandalonePwa } from '@/hooks/useStandalonePwa';
 import { useI18n, getRoleLabel } from '@/i18n/useI18n';
+import {
+  NAV_ITEMS,
+  ROUTE_TITLE_KEYS,
+  filterNavByRole,
+  splitMobileNav,
+  getHomeRoute,
+} from './mobileNavConfig';
 import styles from './AppLayout.module.css';
 
 const SIDEBAR_COLLAPSED_KEY = 'rentspace-sidebar-collapsed';
 
-const navItems = [
-  {
-    to: '/manager',
-    icon: ClipboardList,
-    labelKey: 'nav.home',
-    roles: ['manager', 'director', 'owner', 'org_admin', 'super_admin'],
-  },
-  { to: '/map', icon: Map, labelKey: 'nav.roomMap', roles: ['manager', 'owner', 'director', 'org_admin', 'super_admin', 'accountant', 'viewer'] },
-  { to: '/manager-data', icon: Database, labelKey: 'nav.allData', roles: ['manager', 'director', 'org_admin', 'super_admin'] },
-  { to: '/rooms', icon: Building2, labelKey: 'nav.rooms', roles: ['manager', 'owner', 'director', 'org_admin', 'super_admin', 'accountant', 'viewer'] },
-  { to: '/tenants-contracts', icon: Users, labelKey: 'nav.tenants', roles: ['manager', 'accountant', 'owner', 'director', 'org_admin', 'super_admin'] },
-  { to: '/rent-register', icon: Receipt, labelKey: 'nav.rentRegister', roles: ['manager', 'accountant', 'owner', 'director', 'org_admin', 'super_admin'] },
-  { to: '/charges', icon: FileText, labelKey: 'nav.charges', roles: ['accountant', 'org_admin', 'super_admin', 'manager', 'director'] },
-  { to: '/payments', icon: CreditCard, labelKey: 'nav.payments', roles: ['accountant', 'manager', 'owner', 'director', 'org_admin', 'super_admin'] },
-  { to: '/expenses', icon: Wallet, labelKey: 'nav.expenses', roles: ['manager', 'director', 'accountant', 'org_admin', 'super_admin'] },
-  { to: '/plan-fact', icon: TrendingUp, labelKey: 'nav.planFact', roles: ['manager', 'owner', 'director', 'accountant', 'org_admin', 'super_admin'] },
-  { to: '/month-close', icon: CalendarCheck, labelKey: 'nav.monthClose', roles: ['manager', 'director', 'org_admin', 'super_admin'] },
-  { to: '/reports', icon: BarChart3, labelKey: 'nav.reports', roles: ['owner', 'director', 'accountant', 'org_admin', 'super_admin'] },
-  { to: '/settings', icon: Settings, labelKey: 'nav.settings', roles: ['manager', 'org_admin', 'super_admin', 'owner', 'director', 'accountant'] },
-  { to: '/map-editor', icon: Table2, labelKey: 'nav.mapEditor', roles: ['manager', 'director', 'org_admin', 'super_admin'] },
-];
-
 export function AppLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useI18n();
+  useStandalonePwa();
+
+  const [moreOpen, setMoreOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
@@ -70,19 +47,28 @@ export function AppLayout() {
     }
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [moreOpen]);
+
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  const visibleNav = useMemo(
-    () => navItems.filter((item) => !user?.role || item.roles.includes(user.role)),
-    [user?.role]
-  );
+  const visibleNav = useMemo(() => filterNavByRole(NAV_ITEMS, user?.role), [user?.role]);
+  const { tabs: mobileTabs, more: mobileMore } = useMemo(() => splitMobileNav(visibleNav), [visibleNav]);
 
-  const homeRoute = ['manager', 'director', 'owner', 'org_admin', 'super_admin'].includes(user?.role ?? '')
-    ? '/manager'
-    : '/map';
+  const homeRoute = getHomeRoute(user?.role);
   const toggleSidebar = () => setSidebarCollapsed((v) => !v);
   const effectiveBackgroundId = useEffectiveAppBackgroundId();
   const mainBgStyle = getMainBackgroundStyle(effectiveBackgroundId);
@@ -91,77 +77,183 @@ export function AppLayout() {
   const roleLabel = getRoleLabel(t, user?.role);
   const collapseTitle = sidebarCollapsed ? t('common.expandSidebar') : t('common.collapseSidebar');
 
+  const pageTitleKey = ROUTE_TITLE_KEYS[location.pathname];
+  const pageTitle = pageTitleKey ? t(pageTitleKey) : t('common.appName');
+
+  const moreActive = mobileMore.some((item) => location.pathname === item.to);
+
   return (
-    <div className={`${styles.shell} ${sidebarCollapsed ? styles.shellCollapsed : ''}`}>
+    <div
+      className={`${styles.shell} ${sidebarCollapsed ? styles.shellCollapsed : ''} ${moreOpen ? styles.shellMoreOpen : ''}`}
+    >
+      {/* ——— Desktop sidebar ——— */}
       <aside
-        className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''} ${darkWallpaper ? styles.sidebarDark : ''}`}
+        className={`${styles.sidebar} ${styles.sidebarDesktop} ${sidebarCollapsed ? styles.sidebarCollapsed : ''} ${darkWallpaper ? styles.sidebarDark : ''}`}
       >
         <div className={styles.sidebarOverlay} aria-hidden />
         <div className={styles.sidebarInner}>
-        <div className={styles.sidebarHeader}>
-          <NavLink
-            to={homeRoute}
-            title={sidebarCollapsed ? t('common.appName') : undefined}
-            className={({ isActive }) =>
-              `${styles.navLink} ${styles.brandHome} ${isActive ? styles.active : styles.brandHomeIdle}`
-            }
-          >
-            <img src="/images/logo-mark.png" alt="" className={styles.brandLogo} />
-            <span className={`${styles.navLabel} ${styles.brandName}`}>{t('common.appName')}</span>
-          </NavLink>
-          <button
-            type="button"
-            className={styles.sidebarToggle}
-            onClick={toggleSidebar}
-            title={collapseTitle}
-            aria-label={collapseTitle}
-            aria-expanded={!sidebarCollapsed}
-          >
-            {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-          </button>
-        </div>
-        <div className={styles.propertyCard} title={sidebarCollapsed ? t('common.propertyName') : undefined}>
-          <span className={styles.propertyLabel}>{t('common.object')}</span>
-          <strong>{t('common.propertyName')}</strong>
-          <small>{t('common.propertyCity')}</small>
-        </div>
-        <nav className={styles.nav}>
-          {visibleNav.map(({ to, icon: Icon, labelKey }) => {
-            const label = t(labelKey);
-            return (
+          <div className={styles.sidebarHeader}>
             <NavLink
-              key={to}
-              to={to}
-              title={sidebarCollapsed ? label : undefined}
+              to={homeRoute}
+              title={sidebarCollapsed ? t('common.appName') : undefined}
               className={({ isActive }) =>
-                `${styles.navLink} ${isActive ? styles.active : ''}`
+                `${styles.navLink} ${styles.brandHome} ${isActive ? styles.active : styles.brandHomeIdle}`
               }
             >
-              <Icon size={20} className={styles.navIcon} />
-              <span className={styles.navLabel}>{label}</span>
+              <img src="/images/logo-mark.png" alt="" className={styles.brandLogo} />
+              <span className={`${styles.navLabel} ${styles.brandName}`}>{t('common.appName')}</span>
             </NavLink>
-          );
-          })}
-        </nav>
-        <div className={styles.userBlock}>
-          <div className={styles.userInfo} title={sidebarCollapsed ? user?.name : undefined}>
-            <strong>{user?.name}</strong>
-            <small>{roleLabel}</small>
+            <button
+              type="button"
+              className={styles.sidebarToggle}
+              onClick={toggleSidebar}
+              title={collapseTitle}
+              aria-label={collapseTitle}
+              aria-expanded={!sidebarCollapsed}
+            >
+              {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            </button>
           </div>
-          <button type="button" className={styles.logoutBtn} onClick={handleLogout} aria-label={t('common.logout')}>
-            <LogOut size={18} />
-          </button>
-        </div>
+          <div className={styles.propertyCard} title={sidebarCollapsed ? t('common.propertyName') : undefined}>
+            <span className={styles.propertyLabel}>{t('common.object')}</span>
+            <strong>{t('common.propertyName')}</strong>
+            <small>{t('common.propertyCity')}</small>
+          </div>
+          <nav className={styles.nav}>
+            {visibleNav.map(({ to, icon: Icon, labelKey }) => {
+              const label = t(labelKey);
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  title={sidebarCollapsed ? label : undefined}
+                  className={({ isActive }) => `${styles.navLink} ${isActive ? styles.active : ''}`}
+                >
+                  <Icon size={20} className={styles.navIcon} />
+                  <span className={styles.navLabel}>{label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
+          <div className={styles.userBlock}>
+            <div className={styles.userInfo} title={sidebarCollapsed ? user?.name : undefined}>
+              <strong>{user?.name}</strong>
+              <small>{roleLabel}</small>
+            </div>
+            <button type="button" className={styles.logoutBtn} onClick={handleLogout} aria-label={t('common.logout')}>
+              <LogOut size={18} />
+            </button>
+          </div>
         </div>
       </aside>
+
+      {/* ——— Main ——— */}
       <div
         className={`${styles.main} ${hasImageBg ? styles.mainWithImage : ''} ${darkWallpaper ? styles.mainDark : ''}`}
         style={mainBgStyle}
       >
+        <header className={styles.mobileHeader}>
+          <div className={styles.mobileHeaderMain}>
+            <h1 className={styles.mobilePageTitle}>{pageTitle}</h1>
+            <p className={styles.mobilePageMeta}>
+              {t('common.propertyName')} · {roleLabel}
+            </p>
+          </div>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `${styles.mobileHeaderAction} ${isActive ? styles.mobileHeaderActionActive : ''}`}
+            aria-label={t('nav.settings')}
+          >
+            <img src="/images/logo-mark.png" alt="" width={28} height={28} />
+          </NavLink>
+        </header>
+
         <div className={styles.content}>
           <Outlet />
         </div>
+
+        {/* ——— Mobile bottom navigation ——— */}
+        <nav className={styles.bottomNav} aria-label={t('nav.mobileMain')}>
+          {mobileTabs.map(({ to, icon: Icon, labelKey }) => {
+            const label = t(labelKey);
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `${styles.bottomTab} ${isActive ? styles.bottomTabActive : ''}`}
+              >
+                <Icon size={22} strokeWidth={2} aria-hidden />
+                <span>{label}</span>
+              </NavLink>
+            );
+          })}
+          {mobileMore.length > 0 && (
+            <button
+              type="button"
+              className={`${styles.bottomTab} ${moreOpen || moreActive ? styles.bottomTabActive : ''}`}
+              onClick={() => setMoreOpen(true)}
+              aria-label={t('nav.more')}
+              aria-expanded={moreOpen}
+            >
+              <LayoutGrid size={22} strokeWidth={2} aria-hidden />
+              <span>{t('nav.more')}</span>
+            </button>
+          )}
+        </nav>
       </div>
+
+      {/* ——— «Ещё» — нижняя панель ——— */}
+      {mobileMore.length > 0 && (
+        <>
+          <button
+            type="button"
+            className={`${styles.moreBackdrop} ${moreOpen ? styles.moreBackdropVisible : ''}`}
+            aria-label={t('common.closeMenu')}
+            tabIndex={moreOpen ? 0 : -1}
+            onClick={() => setMoreOpen(false)}
+          />
+          <div
+            className={`${styles.moreSheet} ${moreOpen ? styles.moreSheetOpen : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('nav.more')}
+          >
+            <div className={styles.moreSheetHandle} aria-hidden />
+            <div className={styles.moreSheetHead}>
+              <strong>{t('nav.more')}</strong>
+              <button type="button" className={styles.moreClose} onClick={() => setMoreOpen(false)} aria-label={t('common.closeMenu')}>
+                <X size={22} />
+              </button>
+            </div>
+            <div className={styles.moreUser}>
+              <div>
+                <strong>{user?.name}</strong>
+                <small>{roleLabel}</small>
+              </div>
+              <button type="button" className={styles.moreLogout} onClick={handleLogout}>
+                <LogOut size={18} />
+                {t('common.logout')}
+              </button>
+            </div>
+            <div className={styles.moreGrid}>
+              {mobileMore.map(({ to, icon: Icon, labelKey }) => {
+                const label = t(labelKey);
+                return (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    className={({ isActive }) => `${styles.moreItem} ${isActive ? styles.moreItemActive : ''}`}
+                    onClick={() => setMoreOpen(false)}
+                  >
+                    <Icon size={22} aria-hidden />
+                    <span>{label}</span>
+                  </NavLink>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

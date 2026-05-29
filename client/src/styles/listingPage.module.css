@@ -79,3 +79,56 @@
   font-size: 13px;
   margin: 0 0 12px;
 }
+
+@media (max-width: 900px) {
+  .pageHead {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pageHead h1 {
+    font-size: 22px;
+  }
+
+  .pageActions {
+    width: 100%;
+  }
+
+  .pageActions > * {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar input[type='number'] {
+    width: 100%;
+  }
+
+  .metaGrid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .metaGrid dt {
+    margin-top: 8px;
+  }
+
+  .formActions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .formActions > * {
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .pageHead h1 {
+    font-size: 20px;
+  }
+}

@@ -1,0 +1,17 @@
+/* Shared mobile utilities */
+
+@media (max-width: 900px) {
+  .tableScrollWrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 600px) {
+  .pageHead h1,
+  .toolbar h1 {
+    font-size: 20px !important;
+  }
+}

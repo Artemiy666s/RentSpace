@@ -17,6 +17,7 @@ export const be: TranslationTree = {
   common: {
     save: 'Захаваць',
     saving: 'Захаванне…',
+    preview: 'Папярэдні прагляд',
     loading: 'Загрузка…',
     noData: 'Няма даных',
     cancel: 'Адмена',
@@ -56,6 +57,9 @@ export const be: TranslationTree = {
     roomNo: '№{{no}}',
     expandSidebar: 'Разгарнуць сайдбар',
     collapseSidebar: 'Згарнуць сайдбар',
+    openMenu: 'Адкрыць меню',
+    closeMenu: 'Закрыць меню',
+    backToList: 'Да спісу',
     logout: 'Выйсці',
     personalAccount: 'Асабісты кабінет',
     appName: 'RentSpace.by',
@@ -298,6 +302,8 @@ export const be: TranslationTree = {
     reports: 'Справаздачы',
     settings: 'Налады',
     mapEditor: 'Рэдактар карт',
+    more: 'Яшчэ',
+    mobileMain: 'Асноўная навігацыя',
   },
   roles: {
     manager: 'Заведуючая',

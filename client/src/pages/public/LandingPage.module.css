@@ -1,5 +1,6 @@
 .page {
-  min-width: 1280px;
+  min-width: 0;
+  width: 100%;
   background: #001b3d;
   overflow-x: hidden;
   --header-height: 88px;
@@ -714,4 +715,124 @@
   height: 28px;
   width: auto;
   opacity: 0.85;
+}
+
+@media (max-width: 900px) {
+  .page {
+    --header-height: 72px;
+    padding-top: var(--header-height);
+  }
+
+  .siteHeaderInner {
+    grid-template-columns: 1fr auto;
+    padding: 14px 16px;
+    column-gap: 12px;
+  }
+
+  .nav {
+    display: none;
+  }
+
+  .hero {
+    min-height: auto;
+    max-height: none;
+    height: auto;
+    padding-bottom: 32px;
+  }
+
+  .heroShell {
+    padding: 0 16px;
+  }
+
+  .heroInner {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .heroText h1 {
+    font-size: clamp(28px, 8vw, 40px);
+  }
+
+  .heroStats {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .sectionLight {
+    padding: 48px 16px;
+  }
+
+  .sectionTitle {
+    font-size: 26px;
+    margin-bottom: 32px;
+  }
+
+  .problemsGrid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .stepsRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .stepWrap {
+    max-width: none;
+  }
+
+  .stepArrow {
+    display: none;
+  }
+
+  .floorBlock {
+    flex-direction: column;
+  }
+
+  .floorRow {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .floorSide {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .btnPlanDemo {
+    margin: 16px;
+    display: block;
+    text-align: center;
+  }
+
+  .ctaBox {
+    padding: 28px 20px;
+    margin: 0 16px;
+  }
+
+  .ctaForm {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ctaForm input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .footer {
+    flex-direction: column;
+    padding: 24px 16px;
+    text-align: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .floorRow {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .heroText h1 {
+    font-size: 26px;
+  }
 }

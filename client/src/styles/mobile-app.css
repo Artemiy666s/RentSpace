@@ -1,0 +1,92 @@
+/**
+ * Мобильное веб-приложение: отступы, касания, полноэкранный режим.
+ * Цвета и шрифты — из variables.css.
+ */
+
+@media (max-width: 900px) {
+  html.mobile-app {
+    height: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html.mobile-app body {
+    min-height: 100dvh;
+    min-height: -webkit-fill-available;
+    overscroll-behavior-y: none;
+  }
+
+  html.mobile-app #root {
+    min-height: 100dvh;
+    min-height: -webkit-fill-available;
+  }
+
+  html.pwa-standalone body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  html.pwa-standalone input,
+  html.pwa-standalone textarea,
+  html.pwa-standalone select,
+  html.pwa-standalone [contenteditable='true'] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Крупные зоны нажатия */
+  html.mobile-app button:not(.dragHandle),
+  html.mobile-app a[role='button'],
+  html.mobile-app .navLink {
+    min-height: 44px;
+  }
+
+  /* Карточки вместо плотных таблиц — горизонтальный скролл с подсказкой */
+  html.mobile-app .tableScrollWrap,
+  html.mobile-app [class*='list'] table,
+  html.mobile-app .wrap {
+    border-radius: var(--radius-md);
+  }
+
+  /* Заголовок страницы — в шапке приложения */
+  html.mobile-app [class*='pageHead'] h1 {
+    display: none;
+  }
+
+  html.mobile-app [class*='pageHead'] {
+    margin-bottom: 10px;
+  }
+
+  html.mobile-app h1 {
+    font-size: 1.35rem !important;
+    line-height: 1.25;
+  }
+
+  html.mobile-app h2 {
+    font-size: 1.15rem !important;
+  }
+
+  /* Дашборд: карточки на всю ширину при прокрутке */
+  html.mobile-app .chartsGridItem.sortableBlock {
+    width: min(92vw, 340px) !important;
+  }
+
+  html.mobile-app .quickActionsItem.sortableBlock {
+    width: min(36vw, 132px) !important;
+  }
+
+  /* Скрыть ручки перетаскивания на телефоне — мешают тапам */
+  html.mobile-app .dragHandle {
+    display: none !important;
+  }
+
+  html.mobile-app .sortableBlock:hover .dragHandle,
+  html.mobile-app .sortableBlock:focus-within .dragHandle {
+    display: none !important;
+  }
+}
+
+@media (max-width: 600px) {
+  html.mobile-app .chartsGridItem.sortableBlock {
+    width: 88vw !important;
+  }
+}

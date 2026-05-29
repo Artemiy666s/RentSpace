@@ -99,6 +99,13 @@
   min-width: 168px;
 }
 
+@media (max-width: 900px) {
+  .monthAdd {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 .error {
   color: var(--color-danger);
   margin-bottom: 12px;

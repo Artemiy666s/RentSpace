@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AxiosError } from 'axios';
-import { Plus, Pencil, Trash2, FileSpreadsheet, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, FileSpreadsheet, Search, ChevronLeft } from 'lucide-react';
+import { useIsMobileLayout } from '@/hooks/useMediaQuery';
 import { downloadApiFile } from '@/lib/exportFile';
 import { api } from '@/api/client';
 import { usePropertyStore } from '@/store/propertyStore';
@@ -149,6 +150,8 @@ export function TenantsContractsPage() {
   const [toMonth, setToMonth] = useState('');
   const [toYear, setToYear] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [mobileShowDetail, setMobileShowDetail] = useState(false);
+  const isMobile = useIsMobileLayout();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -390,6 +393,7 @@ export function TenantsContractsPage() {
             onChange={(e) => {
               setSearch(e.target.value);
               setSelectedKey(null);
+              setMobileShowDetail(false);
             }}
             placeholder={t('tenants.searchPlaceholder')}
             aria-label={t('tenants.searchPlaceholder')}
@@ -432,7 +436,9 @@ export function TenantsContractsPage() {
         />
       </div>
 
-      <div className={styles.grid}>
+      <div
+        className={`${styles.grid} ${isMobile && mobileShowDetail && selectedKey ? styles.gridDetailOnly : ''} ${isMobile && !mobileShowDetail ? styles.gridListOnly : ''}`}
+      >
         <Card className={styles.list}>
           <table className={styles.table}>
             <thead>
@@ -478,7 +484,10 @@ export function TenantsContractsPage() {
                   <tr
                     key={row.rowKey}
                     className={selectedKey === row.rowKey ? styles.selected : ''}
-                    onClick={() => setSelectedKey(row.rowKey)}
+                    onClick={() => {
+                      setSelectedKey(row.rowKey);
+                      if (isMobile) setMobileShowDetail(true);
+                    }}
                   >
                     <td className={styles.tenantCell}>
                       <span className={styles.tenantName}>{row.tenantName}</span>
@@ -519,6 +528,16 @@ export function TenantsContractsPage() {
         <Card className={styles.card}>
           {selectedRow ? (
             <>
+              {isMobile && (
+                <button
+                  type="button"
+                  className={styles.mobileBack}
+                  onClick={() => setMobileShowDetail(false)}
+                >
+                  <ChevronLeft size={18} />
+                  {t('common.backToList')}
+                </button>
+              )}
               <div className={styles.detailHead}>
                 <h2>{selectedRow.tenantName}</h2>
                 <div className={styles.detailActions}>

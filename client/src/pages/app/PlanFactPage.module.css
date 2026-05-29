@@ -302,3 +302,39 @@
   font-weight: 600;
   font-size: 14px;
 }
+
+@media (max-width: 900px) {
+  .header h1 {
+    font-size: 22px;
+  }
+
+  .monthBar {
+    flex-wrap: wrap;
+  }
+
+  .monthAdd {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .rowEditGrid {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+
+  .pfWrap {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 600px) {
+  .filters {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .filters > * {
+    width: 100%;
+  }
+}

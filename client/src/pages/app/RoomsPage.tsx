@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import type { AxiosError } from 'axios';
-import { Key, Pencil, UserRoundPen, Map } from 'lucide-react';
+import { Key, Pencil, UserRoundPen, Map, ChevronLeft } from 'lucide-react';
+import { useIsMobileLayout } from '@/hooks/useMediaQuery';
 import { api } from '@/api/client';
 import { usePropertyStore } from '@/store/propertyStore';
 import { useI18n } from '@/i18n/useI18n';
@@ -67,6 +68,8 @@ export function RoomsPage() {
   const [buildingFilter, setBuildingFilter] = useState('');
   const [floorFilter, setFloorFilter] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
+  const [mobileShowDetail, setMobileShowDetail] = useState(false);
+  const isMobile = useIsMobileLayout();
   const [editRoomId, setEditRoomId] = useState<number | null>(null);
   const [rentRoomId, setRentRoomId] = useState<number | null>(null);
   const [rentDefaultRate, setRentDefaultRate] = useState<number | undefined>();
@@ -266,7 +269,9 @@ export function RoomsPage() {
         />
       </div>
 
-      <div className={styles.grid}>
+      <div
+        className={`${styles.grid} ${isMobile && mobileShowDetail && selectedRoomId ? styles.gridDetailOnly : ''} ${isMobile && !mobileShowDetail ? styles.gridListOnly : ''}`}
+      >
         <Card className={styles.list}>
           <table className={styles.table}>
             <thead>
@@ -309,7 +314,10 @@ export function RoomsPage() {
                   <tr
                     key={row.id}
                     className={selectedRoomId === row.id ? styles.selected : ''}
-                    onClick={() => setSelectedRoomId(row.id)}
+                    onClick={() => {
+                      setSelectedRoomId(row.id);
+                      if (isMobile) setMobileShowDetail(true);
+                    }}
                   >
                     <td className={styles.roomCell}>
                       <span className={styles.roomName}>{row.room_number}</span>
@@ -366,6 +374,16 @@ export function RoomsPage() {
               <p className={styles.empty}>{t('common.loading')}</p>
             ) : (
               <>
+                {isMobile && (
+                  <button
+                    type="button"
+                    className={styles.mobileBack}
+                    onClick={() => setMobileShowDetail(false)}
+                  >
+                    <ChevronLeft size={18} />
+                    {t('common.backToList')}
+                  </button>
+                )}
                 <div className={styles.detailHead}>
                   <div>
                     <h2>{detailTitle}</h2>

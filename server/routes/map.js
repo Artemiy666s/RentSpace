@@ -22,6 +22,12 @@ function planImageUrl(plan) {
   return `/uploads/${plan.image_path.replace(/^server\/uploads\/?/, '')}`;
 }
 
+function planImageHref(plan) {
+  if (!plan) return null;
+  if (plan.image_blob) return `/api/floor-plans/${plan.id}/image`;
+  return planImageUrl(plan);
+}
+
 function parsePointsJson(raw) {
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
@@ -81,12 +87,38 @@ async function buildPlanPayload(plan, floorId) {
   }));
 
   return {
-    plan: { ...plan, imageUrl: planImageUrl(plan) },
+    plan: { ...plan, imageUrl: planImageHref(plan) },
     shapes,
     rooms,
     floorRooms: floorRoomsMeta,
   };
 }
+
+router.get(
+  '/floor-plans/:floorPlanId/image',
+  asyncHandler(async (req, res) => {
+    const planId = Number(req.params.floorPlanId);
+    const plan = await db('floor_plans').where({ id: planId, is_active: true }).first();
+    if (!plan) return fail(res, 'План не найден', 404);
+
+    // Prefer DB blob (works on Vercel where uploads dir is ephemeral)
+    if (plan.image_blob) {
+      const mime = plan.image_mime || 'image/png';
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.end(plan.image_blob);
+    }
+
+    // Fallback to file on disk (self-hosted / dev)
+    if (!plan.image_path) return fail(res, 'Изображение плана отсутствует', 404);
+    const uploadRoot = path.isAbsolute(config.upload.dir)
+      ? config.upload.dir
+      : path.join(process.cwd(), config.upload.dir);
+    const abs = path.join(uploadRoot, plan.image_path);
+    if (!fs.existsSync(abs)) return fail(res, 'Файл плана не найден', 404);
+    return res.sendFile(abs);
+  })
+);
 
 router.get(
   '/floors/:floorId/plan',
@@ -127,12 +159,18 @@ router.post(
       if (req.file) {
         upd.image_path = path.join('floor-plans', req.file.filename).replace(/\\/g, '/');
         upd.original_file_name = req.file.originalname;
+        try {
+          upd.image_mime = req.file.mimetype || null;
+          upd.image_blob = fs.readFileSync(req.file.path);
+        } catch {
+          // ignore: we'll still have image_path for self-hosted environments
+        }
       } else if (!req.body.keepPlan) {
         return fail(res, 'Загрузите изображение плана', 400);
       }
       await db('floor_plans').where({ id: existing.id }).update(upd);
       const plan = await db('floor_plans').where({ id: existing.id }).first();
-      return ok(res, { ...plan, imageUrl: planImageUrl(plan) });
+      return ok(res, { ...plan, imageUrl: planImageHref(plan) });
     }
 
     const prevCount = await db('floor_plans').where({ floor_id: floorId }).count('id as c').first();
@@ -149,13 +187,19 @@ router.post(
     if (req.file) {
       payload.image_path = path.join('floor-plans', req.file.filename).replace(/\\/g, '/');
       payload.original_file_name = req.file.originalname;
+      try {
+        payload.image_mime = req.file.mimetype || null;
+        payload.image_blob = fs.readFileSync(req.file.path);
+      } catch {
+        // ignore
+      }
     } else {
       return fail(res, 'Загрузите изображение плана', 400);
     }
 
     const [id] = await db('floor_plans').insert(payload);
     const plan = await db('floor_plans').where({ id }).first();
-    ok(res, { ...plan, imageUrl: planImageUrl(plan) }, 201);
+    ok(res, { ...plan, imageUrl: planImageHref(plan) }, 201);
   })
 );
 
@@ -172,7 +216,7 @@ router.patch(
 
     await db('floor_plans').where({ id: plan.id }).update(upd);
     const updated = await db('floor_plans').where({ id: plan.id }).first();
-    ok(res, { ...updated, imageUrl: planImageUrl(updated) });
+    ok(res, { ...updated, imageUrl: planImageHref(updated) });
   })
 );
 

@@ -17,6 +17,7 @@ export const en: TranslationTree = {
   common: {
     save: 'Save',
     saving: 'Saving…',
+    preview: 'Preview',
     loading: 'Loading…',
     noData: 'No data',
     cancel: 'Cancel',
@@ -56,6 +57,9 @@ export const en: TranslationTree = {
     roomNo: '№{{no}}',
     expandSidebar: 'Expand sidebar',
     collapseSidebar: 'Collapse sidebar',
+    openMenu: 'Open menu',
+    closeMenu: 'Close menu',
+    backToList: 'Back to list',
     logout: 'Log out',
     personalAccount: 'Personal account',
     appName: 'RentSpace.by',
@@ -298,6 +302,8 @@ export const en: TranslationTree = {
     reports: 'Reports',
     settings: 'Settings',
     mapEditor: 'Map editor',
+    more: 'More',
+    mobileMain: 'Main navigation',
   },
   roles: {
     manager: 'Property manager',

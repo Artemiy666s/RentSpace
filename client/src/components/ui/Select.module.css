@@ -183,3 +183,11 @@
   font-size: 13px;
   color: var(--color-danger);
 }
+
+@media (max-width: 900px) {
+  .root {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+}

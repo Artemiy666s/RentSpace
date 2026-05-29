@@ -182,3 +182,26 @@
 .toolbar select {
   min-width: 140px;
 }
+
+@media (max-width: 900px) {
+  .wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar select,
+  .toolbar input:not([type='number']) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .table thead th,
+  .table tbody td {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+}

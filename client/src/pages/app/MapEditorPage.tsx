@@ -73,6 +73,7 @@ export function MapEditorPage() {
   const [buildingModal, setBuildingModal] = useState<'create' | 'edit' | 'delete' | null>(null);
   const [floorModal, setFloorModal] = useState<'create' | 'edit' | 'delete' | null>(null);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [pendingPlanFile, setPendingPlanFile] = useState<File | null>(null);
   const [editingContour, setEditingContour] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
 
@@ -288,6 +289,10 @@ export function MapEditorPage() {
       invalidate();
       setStep('draw');
       setUploadPreview(null);
+      setPendingPlanFile(null);
+    },
+    onError: (err) => {
+      showFeedback('error', getApiErrorMessage(err, t('mapEditor.saveFailed')));
     },
   });
 
@@ -412,7 +417,15 @@ export function MapEditorPage() {
 
   const handleFile = (file: File) => {
     setUploadPreview(URL.createObjectURL(file));
-    uploadPlan.mutate(file);
+    setPendingPlanFile(file);
+  };
+
+  const handleSavePlan = () => {
+    if (!pendingPlanFile) {
+      showFeedback('error', t('common.uploadPlanPrevStep'));
+      return;
+    }
+    uploadPlan.mutate(pendingPlanFile);
   };
 
   const canSaveContour =
@@ -717,6 +730,24 @@ export function MapEditorPage() {
                 <div>{t('common.uploadClickOrDrop')}</div>
                 <div className={styles.planMeta}>{t('common.uploadScanHint')}</div>
               </label>
+              {uploadPreview && (
+                <>
+                  <p className={styles.planMeta}>{t('common.preview')}</p>
+                  <img className={styles.previewThumb} src={uploadPreview} alt={t('common.floorPlan')} />
+                  <div className={styles.actions}>
+                    <Button variant="secondary" onClick={() => fileRef.current?.click()}>
+                      {t('common.replaceImage')}
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={handleSavePlan}
+                      disabled={uploadPlan.isPending || !pendingPlanFile}
+                    >
+                      {uploadPlan.isPending ? t('common.saving') : t('common.save')}
+                    </Button>
+                  </div>
+                </>
+              )}
               {uploadPlan.isPending && <p className={styles.planMeta}>{t('common.loading')}</p>}
               {plan?.imageUrl && (
                 <>
