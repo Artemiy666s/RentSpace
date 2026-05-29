@@ -1,0 +1,17 @@
+node_modules/
+client/node_modules/
+.env
+server/public/*
+!server/public/.gitkeep
+server/uploads/*
+!server/uploads/.gitkeep
+dist/
+*.log
+.DS_Store
+Thumbs.db
+.vercel
+.env.vercel.local
+pxz.json
+*.xlsx
+*.xls
+/data/*.xlsx

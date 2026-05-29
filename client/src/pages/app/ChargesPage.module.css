@@ -1,0 +1,12 @@
+.page {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+.header h1 { margin: 0; font-size: 24px; }
+.filters { display: flex; gap: 8px; align-items: center; }
+.filters select, .filters input { padding: 10px; border-radius: 10px; border: 1px solid var(--color-border); }
+.tableWrap { padding: 0; overflow: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th, .table td { padding: 12px 16px; border-bottom: 1px solid var(--color-border); }

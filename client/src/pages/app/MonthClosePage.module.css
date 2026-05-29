@@ -1,0 +1,225 @@
+.page {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.pageHeader {
+  margin-bottom: 20px;
+}
+
+.pageHeader h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.lead {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 15px;
+  line-height: 1.5;
+  max-width: none;
+}
+
+.guide {
+  margin-bottom: 20px;
+  padding: 22px 24px;
+}
+
+.guide h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.steps li + li {
+  margin-top: 6px;
+}
+
+.toolbar {
+  margin-bottom: 20px;
+  padding: 20px 24px;
+}
+
+.periodRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.periodLabel {
+  font-size: 13px;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.periodValue {
+  font-size: 18px;
+  color: var(--color-navy);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.filters select,
+.filters input {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.filters a {
+  text-decoration: none;
+}
+
+.statusHint {
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.statusBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--color-border);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.iconOk {
+  color: var(--color-success-text);
+  flex-shrink: 0;
+}
+
+.iconFail {
+  color: #c00;
+  flex-shrink: 0;
+}
+
+.checklistGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.checkCard {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cardOk {
+  border-color: rgba(13, 92, 46, 0.25);
+}
+
+.cardWarn {
+  border-color: rgba(180, 83, 9, 0.3);
+}
+
+.cardFail {
+  border-color: rgba(204, 0, 0, 0.25);
+}
+
+.checkCardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.checkCardHead svg {
+  color: var(--color-blue);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.checkCardHead strong {
+  display: block;
+  font-size: 15px;
+  color: var(--color-navy);
+}
+
+.checkCount {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-blue);
+}
+
+.checkHint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.45;
+  flex: 1;
+}
+
+.checkActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checkActions a {
+  text-decoration: none;
+}
+
+.issues {
+  display: grid;
+  gap: 16px;
+}
+
+.issueCard {
+  padding: 20px 24px;
+}
+
+.issueCard h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.error {
+  color: #c00;
+  font-size: 14px;
+  margin: 0 0 8px;
+  line-height: 1.45;
+}
+
+.warning {
+  color: #b45309;
+  font-size: 14px;
+  margin: 0 0 8px;
+  line-height: 1.45;
+}
+
+.error a,
+.warning a {
+  color: inherit;
+  font-weight: 600;
+}

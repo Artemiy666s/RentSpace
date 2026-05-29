@@ -1,0 +1,12 @@
+node_modules
+client/node_modules
+.git
+.env
+.env.*
+*.xlsx
+*.xls
+server/uploads
+pxz.json
+client/dist
+dist
+*.log

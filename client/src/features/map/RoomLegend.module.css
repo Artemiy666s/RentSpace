@@ -1,0 +1,31 @@
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-solid);
+  color: var(--color-navy);
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.item.active {
+  border-color: var(--color-blue);
+  background: rgba(18, 103, 232, 0.08);
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}

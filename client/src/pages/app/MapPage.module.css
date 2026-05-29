@@ -1,0 +1,168 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.toolbar h1 {
+  margin: 0;
+  font-size: 24px;
+  flex: 1;
+}
+
+.selectors {
+  display: flex;
+  gap: 8px;
+}
+
+.selectors select,
+.select {
+  min-width: 140px;
+}
+
+.search input {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  font-size: 14px;
+  background: var(--color-input-bg);
+  color: var(--color-text);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-surface-solid);
+  color: var(--color-navy);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0 12px;
+}
+
+.search input {
+  border: none;
+  outline: none;
+  min-width: 200px;
+}
+
+.viewToggle {
+  display: flex;
+  gap: 4px;
+  background: var(--color-toggle-track);
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.viewToggle button {
+  border: none;
+  background: var(--btn-gradient);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.72;
+  box-shadow: 0 4px 14px rgba(18, 103, 232, 0.18);
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.viewToggle button:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.activeView {
+  opacity: 1 !important;
+  box-shadow: var(--btn-gradient-shadow) !important;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 20px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.grid > * {
+  min-height: 0;
+}
+
+.gridTable {
+  display: block;
+  width: 100%;
+}
+
+.tableCard {
+  padding: 16px;
+}
+
+.mapCard {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 520px;
+}
+
+.mapCard > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.hint {
+  padding: 48px;
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.filterHint {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(18, 103, 232, 0.08);
+  font-size: 13px;
+  color: var(--color-navy);
+}
+
+.filterHint button {
+  margin-left: 8px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(18, 103, 232, 0.18);
+}
+
+.metrics {
+  display: flex;
+  gap: 24px;
+  padding: 14px 20px;
+  background: var(--color-card);
+  border-radius: 14px;
+  border: 1px solid var(--color-border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}

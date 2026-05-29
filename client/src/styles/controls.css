@@ -1,0 +1,80 @@
+/**
+ * Unified selects and compact filter inputs across the app.
+ */
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 42px;
+  padding: 10px 40px 10px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text);
+  background-color: transparent;
+  background-image: var(--select-chevron), var(--select-gradient);
+  background-repeat: no-repeat, no-repeat;
+  background-position: right 12px center, 0 0;
+  background-size: 16px 16px, 100% 100%;
+  box-shadow: var(--select-shadow);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+select:hover:not(:disabled) {
+  border-color: rgba(18, 103, 232, 0.4);
+  box-shadow: var(--select-shadow-hover);
+}
+
+select:focus-visible {
+  outline: none;
+  border-color: var(--color-blue);
+  box-shadow: 0 0 0 3px rgba(18, 103, 232, 0.14);
+}
+
+select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+select option {
+  background-color: var(--color-surface-solid);
+  color: var(--color-text);
+  font-weight: 500;
+  padding: 8px 10px;
+}
+
+select option:checked {
+  background: linear-gradient(135deg, var(--color-blue) 0%, var(--color-emerald) 100%);
+  color: #fff;
+}
+
+/* Year / numeric filters in toolbars */
+input[type='number']:not(.pass-input) {
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--select-gradient);
+  box-shadow: var(--select-shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type='number']:not(.pass-input):hover {
+  border-color: rgba(18, 103, 232, 0.4);
+  box-shadow: var(--select-shadow-hover);
+}
+
+input[type='number']:not(.pass-input):focus-visible {
+  outline: none;
+  border-color: var(--color-blue);
+  box-shadow: 0 0 0 3px rgba(18, 103, 232, 0.14);
+}

@@ -1,0 +1,304 @@
+.page {
+  max-width: 100%;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hint {
+  margin-top: 12px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.cell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.sep {
+  color: var(--color-muted);
+  user-select: none;
+}
+
+.editablePart {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  border-radius: 4px;
+  padding: 1px 3px;
+  transition: background 0.15s ease;
+}
+
+.editablePart:hover {
+  background: rgba(18, 103, 232, 0.12);
+}
+
+.staticPart {
+  padding: 1px 3px;
+}
+
+.autoBadge {
+  margin-left: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--color-blue);
+  vertical-align: super;
+  opacity: 0.85;
+}
+
+.modalHint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.45;
+}
+
+.error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--color-danger);
+}
+
+.monthBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.monthLabel {
+  color: var(--color-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.monthChips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.monthChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(18, 103, 232, 0.14);
+  color: var(--color-blue);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.monthChipRemove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.monthAdd {
+  min-width: 190px;
+}
+
+.deleteBtn {
+  color: var(--color-danger) !important;
+}
+
+.deleteBtn:hover {
+  background: rgba(220, 38, 38, 0.1) !important;
+}
+
+.modalActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.cellMuted {
+  color: var(--color-muted);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-card);
+}
+
+.pfTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: auto;
+}
+
+.pfTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-table-head-bg);
+  padding: 10px 12px;
+  font-weight: 700;
+  color: var(--color-navy);
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pfTable thead th.indicatorCol,
+.pfTable thead th.actionsCol {
+  text-align: left;
+  vertical-align: middle;
+}
+
+.monthGroupHead {
+  border-bottom: 1px solid var(--color-border);
+  font-size: 14px;
+}
+
+.subCol {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  min-width: 72px;
+}
+
+.indicatorCol {
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.sortableThBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sortIconMuted {
+  opacity: 0.45;
+}
+
+.sortIconActive {
+  color: var(--color-blue);
+}
+
+.actionsCol {
+  width: 100px;
+  text-align: center !important;
+}
+
+.pfTable tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.pfTable tbody tr:hover td {
+  background: rgba(18, 103, 232, 0.04);
+}
+
+.indicatorCell {
+  text-align: left;
+  font-weight: 500;
+}
+
+.indicatorName {
+  display: inline;
+  line-height: 1.35;
+}
+
+.nameEditBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-blue);
+  cursor: pointer;
+  vertical-align: middle;
+  border-radius: 6px;
+}
+
+.nameEditBtn:hover {
+  background: rgba(18, 103, 232, 0.12);
+}
+
+.valueCell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.actionsCell {
+  text-align: center;
+}
+
+.emptyCell {
+  text-align: center;
+  color: var(--color-muted);
+  padding: 24px !important;
+}
+
+.rowActions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.rowEditGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px 12px;
+  margin: 16px 0;
+  max-height: min(55vh, 420px);
+  overflow-y: auto;
+}
+
+.rowEditHead {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rowEditMonth {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  font-size: 14px;
+}

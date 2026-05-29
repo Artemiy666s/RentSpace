@@ -1,0 +1,313 @@
+.page {
+  display: flex;
+  width: 100%;
+  min-height: 100svh;
+  height: 100svh;
+  overflow: hidden;
+  background: #fff;
+}
+
+/* Фото слева на всю высоту; ширина — по пропорциям картинки */
+.left {
+  flex-shrink: 0;
+  height: 100svh;
+  overflow: hidden;
+  line-height: 0;
+  background-color: #001b3d;
+}
+
+.leftImg {
+  display: block;
+  height: 100svh;
+  width: auto;
+  max-height: 100svh;
+}
+
+/* Справа от фото — белый фон как в макете */
+.right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 48px;
+  background: #fff;
+}
+
+.formCard {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 36px 36px 28px;
+  box-shadow:
+    0 4px 24px rgba(16, 33, 63, 0.08),
+    0 1px 3px rgba(16, 33, 63, 0.06);
+}
+
+.formCard h2 {
+  font-size: 24px;
+  font-weight: 800;
+  color: #001b3d;
+  margin: 0 0 8px;
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  text-align: center;
+  font-size: 13px;
+  color: #6b7a90;
+  margin: 0 0 28px;
+  line-height: 1.45;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.inputWrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid #d8e3ef;
+  border-radius: 10px;
+  padding: 0 14px;
+  background: #f5f9fc;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.inputWrap:focus-within {
+  border-color: #1267e8;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(18, 103, 232, 0.1);
+}
+
+.inputIcon {
+  color: #9aa8bc;
+  flex-shrink: 0;
+}
+
+.inputWrap input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 14px 10px;
+  font-size: 15px;
+  font-family: inherit;
+  color: #10213f;
+  background: transparent;
+}
+
+.inputWrap input::placeholder {
+  color: #9aa8bc;
+}
+
+.eyeBtn {
+  border: none;
+  background: none;
+  color: #9aa8bc;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+}
+
+.fieldError {
+  display: block;
+  font-size: 12px;
+  color: #e5484d;
+  margin-top: 4px;
+}
+
+.fieldHint {
+  display: block;
+  font-size: 12px;
+  color: #6b7a90;
+  margin-top: 4px;
+}
+
+.formError {
+  color: #e5484d;
+  font-size: 14px;
+  text-align: center;
+  margin: 0 0 8px;
+}
+
+.formRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0 20px;
+}
+
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #10213f;
+  cursor: pointer;
+}
+
+.remember input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #d8e3ef;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.checkboxOn {
+  background: #32cd32;
+  border-color: #32cd32;
+  color: #fff;
+}
+
+.forgot {
+  font-size: 13px;
+  color: #1267e8;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.forgot:hover {
+  text-decoration: underline;
+}
+
+.submitBtn {
+  width: 100%;
+  padding: 15px 24px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: var(--btn-gradient-shadow);
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.submitBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--btn-gradient-shadow-hover);
+}
+
+.submitBtn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 28px 0 16px;
+  color: #9aa8bc;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e8eef4;
+}
+
+.roleTitle {
+  text-align: center;
+  font-size: 13px;
+  color: #6b7a90;
+  margin: 0 0 14px;
+}
+
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.roleCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 6px 14px;
+  border: 1px solid #e2eaf2;
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #10213f;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.roleCard svg {
+  color: #6b7a90;
+}
+
+.roleCard:hover {
+  border-color: #1267e8;
+  background: #fff;
+}
+
+.roleCardActive {
+  border-color: #1267e8;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(18, 103, 232, 0.12);
+}
+
+.roleCardActive svg {
+  color: #1267e8;
+}
+
+.backLink {
+  display: block;
+  text-align: center;
+  font-size: 13px;
+  color: #1267e8;
+  text-decoration: none;
+  font-weight: 500;
+  margin-bottom: 20px;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+}
+
+.copyright {
+  text-align: center;
+  font-size: 11px;
+  color: #9aa8bc;
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .right {
+    padding: 32px 28px;
+  }
+}

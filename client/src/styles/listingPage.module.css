@@ -1,0 +1,81 @@
+.page {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.pageHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.pageHead h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.pageActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sortHint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.toolbar input[type='number'] {
+  width: 96px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1.5px solid var(--color-border);
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.metaGrid dt {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.metaGrid dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.formError {
+  color: var(--color-danger);
+  font-size: 13px;
+  margin: 0 0 12px;
+}

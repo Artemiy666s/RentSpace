@@ -1,0 +1,55 @@
+.modeToggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: #eef2f7;
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.modeToggle button {
+  flex: 1;
+  border: none;
+  background: var(--btn-gradient);
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.72;
+  box-shadow: 0 4px 14px rgba(18, 103, 232, 0.18);
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+
+.modeToggle button:hover {
+  opacity: 0.88;
+}
+
+.active {
+  opacity: 1 !important;
+  box-shadow: var(--btn-gradient-shadow) !important;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 12px 0 6px;
+}
+
+.select {
+  width: 100%;
+}
+
+.calc {
+  font-size: 14px;
+  color: var(--color-muted);
+  margin: 8px 0 12px;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 13px;
+  margin: 0 0 12px;
+}

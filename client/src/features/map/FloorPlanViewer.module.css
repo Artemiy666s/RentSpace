@@ -1,0 +1,81 @@
+.wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  min-height: 100%;
+  background: var(--color-map-canvas-bg);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.zoom {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-map-control-bg);
+  padding: 8px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 16px rgba(16, 33, 63, 0.08);
+}
+
+.zoom button {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: var(--btn-gradient);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(18, 103, 232, 0.18);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.zoom button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--btn-gradient-shadow);
+}
+
+.zoomLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7a90;
+  padding: 2px 0;
+}
+
+.viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  cursor: grab;
+}
+
+.viewport:active {
+  cursor: grabbing;
+}
+
+.canvas {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.svg {
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(16, 33, 63, 0.06);
+}

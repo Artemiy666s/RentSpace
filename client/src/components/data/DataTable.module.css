@@ -1,0 +1,184 @@
+.wrap {
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-card);
+  backdrop-filter: blur(12px);
+}
+
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.alignLeft {
+  text-align: left;
+}
+
+.alignRight {
+  text-align: right;
+}
+
+.alignCenter {
+  text-align: center;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-table-head-bg);
+  text-align: left;
+  padding: 12px 14px;
+  font-weight: 700;
+  color: var(--color-navy);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table thead th.alignRight {
+  text-align: right;
+}
+
+.table thead th.alignCenter {
+  text-align: center;
+}
+
+.sortableTh {
+  padding: 0;
+}
+
+.sortBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sortBtnLeft {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.sortBtnLeft .sortBtnLabel {
+  text-align: left;
+}
+
+.sortBtnRight {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.sortBtnCenter {
+  justify-content: center;
+  text-align: center;
+}
+
+.sortBtnRight .sortBtnLabel,
+.sortBtnCenter .sortBtnLabel {
+  flex: 0 1 auto;
+}
+
+.sortBtn:hover {
+  color: var(--color-blue);
+}
+
+.sortBtnLabel {
+  min-width: 0;
+}
+
+.sortIconMuted {
+  flex-shrink: 0;
+  opacity: 0.35;
+}
+
+.sortIconActive {
+  flex-shrink: 0;
+  color: var(--color-blue);
+}
+
+.numValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.cellInner {
+  width: 100%;
+  min-width: 0;
+}
+
+.cellInnerLeft {
+  text-align: left;
+}
+
+.cellInnerRight {
+  text-align: right;
+}
+
+.cellInnerCenter {
+  text-align: center;
+}
+
+.thWithUnit {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.thUnit {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-table-row-border);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover {
+  background: rgba(18, 103, 232, 0.04);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.toolbar input:not([type='number']) {
+  padding: 10px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  font-size: 14px;
+  background: var(--color-input-bg);
+  color: var(--color-text);
+}
+
+.toolbar select {
+  min-width: 140px;
+}

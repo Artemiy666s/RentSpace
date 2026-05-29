@@ -1,0 +1,42 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  background: var(--btn-gradient);
+  color: #fff;
+  box-shadow: var(--btn-gradient-shadow);
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: var(--btn-gradient-shadow-hover);
+}
+
+.full {
+  width: 100%;
+}
+
+/* Variants share the same gradient; kept for API compatibility */
+.primary,
+.secondary,
+.surface,
+.danger,
+.ghost {
+  background: var(--btn-gradient);
+  color: #fff;
+  border: none;
+  box-shadow: var(--btn-gradient-shadow);
+}
