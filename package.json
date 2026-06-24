@@ -7,6 +7,7 @@
     "sync:photos": "node scripts/sync-photos.js",
     "setup:56e": "node scripts/setup-building-56e.js",
     "seed:tenants": "npx cross-env NODE_ENV=development node scripts/seed-kvartal-tenants.js",
+    "sync:kvartal": "npx cross-env NODE_ENV=development node scripts/sync-kvartal-register.js",
     "dev": "npx concurrently -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npx nodemon server/app.js",
     "dev:client": "npm run dev --prefix client",

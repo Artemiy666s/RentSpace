@@ -23,12 +23,19 @@ type RegisterRow = RentRegisterRow & {
 
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
+function defaultVisibleMonths(date = new Date()): number[] {
+  const current = date.getMonth() + 1;
+  const prev = current === 1 ? 12 : current - 1;
+  const next = current === 12 ? 1 : current + 1;
+  return [prev, current, next];
+}
+
 export function RentRegisterPage() {
   const { t } = useI18n();
   const { propertyId, setPropertyId } = usePropertyStore();
   const [filterBuildingId, setFilterBuildingId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
-  const [selectedMonths, setSelectedMonths] = useState<number[]>(() => [...ALL_MONTHS]);
+  const [selectedMonths, setSelectedMonths] = useState<number[]>(() => defaultVisibleMonths());
   const [selectedRow, setSelectedRow] = useState<RegisterRow | null>(null);
 
   const { data: properties } = useQuery({
