@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { TrendingUp, Building2, Wallet, AlertCircle, Map, CalendarCheck, Table2 } from 'lucide-react';
+import { TrendingUp, Building2, Wallet, AlertCircle, Map, Table2 } from 'lucide-react';
 import { api } from '@/api/client';
 import { downloadApiFile } from '@/lib/exportFile';
 import { usePropertyStore } from '@/store/propertyStore';
@@ -11,8 +11,6 @@ import { formatPersonalGreeting } from '@/lib/greeting';
 import { useHomeDashboardLayout } from '@/hooks/useHomeDashboardLayout';
 import type { DashboardSectionId } from '@/lib/dashboardLayout';
 import { DashboardAnalyticsCharts } from '@/features/dashboard/DashboardAnalyticsCharts';
-import { DashboardQuickActions } from '@/features/dashboard/DashboardQuickActions';
-import { DashboardPanelsGrid } from '@/features/dashboard/DashboardPanelsGrid';
 import { SortableBlock } from '@/features/dashboard/SortableBlock';
 import { useSortableDnd } from '@/features/dashboard/useSortableDnd';
 import { Card } from '@/components/ui/Card';
@@ -21,11 +19,7 @@ import managerStyles from './ManagerPage.module.css';
 import styles from './DashboardPage.module.css';
 
 const ANALYTICS_ROLES = ['owner', 'director', 'org_admin', 'super_admin', 'manager'] as const;
-const OPERATIONAL_ROLES = ['manager', 'director', 'org_admin', 'super_admin'] as const;
 const OPS_HEADER_ROLES = ['director', 'org_admin', 'super_admin'] as const;
-
-type FreeRoomRow = { id: number; room_number: string; area: number };
-type ExpiringContractRow = { id: number; contract_number: string; end_date: string };
 
 export function HomePage() {
   const { t, locale } = useI18n();
@@ -36,16 +30,12 @@ export function HomePage() {
   const { propertyId } = usePropertyStore();
 
   const showAnalytics = !!(role && (ANALYTICS_ROLES as readonly string[]).includes(role));
-  const showOperational = !!(role && (OPERATIONAL_ROLES as readonly string[]).includes(role));
   const showOpsHeader = !!(role && (OPS_HEADER_ROLES as readonly string[]).includes(role));
 
-  const {
-    layout,
-    reorderSections,
-    reorderCharts,
-    reorderPanels,
-    reorderQuickActions,
-  } = useHomeDashboardLayout(user?.id, { showAnalytics, showOperational });
+  const { layout, reorderSections, reorderCharts } = useHomeDashboardLayout(user?.id, {
+    showAnalytics,
+    showOperational: false,
+  });
 
   const sectionDnd = useSortableDnd();
 
@@ -82,7 +72,7 @@ export function HomePage() {
       value: kpis?.totalArea?.toFixed(0) ?? t('common.dash'),
       unit: t('common.sqm'),
       icon: Building2,
-      href: '/rooms',
+      href: '/map',
     },
     {
       label: t('common.occupancy'),
@@ -103,12 +93,9 @@ export function HomePage() {
       value: kpis?.debt?.toFixed(0) ?? t('common.dash'),
       unit: t('common.currencyByn'),
       icon: AlertCircle,
-      href: '/payments',
+      href: '/rent-register',
     },
   ];
-
-  const freeRooms = (data?.freeRooms as FreeRoomRow[] | undefined) ?? [];
-  const expiringContracts = (data?.expiringContracts as ExpiringContractRow[] | undefined) ?? [];
 
   const sectionBlocks: Record<DashboardSectionId, React.ReactNode> = {
     kpis: (
@@ -141,25 +128,9 @@ export function HomePage() {
         onReorderCharts={reorderCharts}
       />
     ),
-    quickActions: (
-      <DashboardQuickActions
-        actionOrder={layout.quickActions}
-        onReorderActions={reorderQuickActions}
-      />
-    ),
-    panels: (
-      <DashboardPanelsGrid
-        data={data}
-        panelOrder={layout.panels}
-        onReorderPanels={reorderPanels}
-        freeRooms={freeRooms}
-        expiringContracts={expiringContracts}
-        locale={locale}
-      />
-    ),
+    quickActions: null,
+    panels: null,
   };
-
-  const canCustomize = showAnalytics || showOperational;
 
   return (
     <div className={styles.page}>
@@ -167,7 +138,7 @@ export function HomePage() {
         <div>
           <h1>{greeting}!</h1>
           <p className={styles.subtitle}>{subtitle}</p>
-          {canCustomize && <p className={styles.layoutHint}>{t('dashboard.layoutHint')}</p>}
+          {showAnalytics && <p className={styles.layoutHint}>{t('dashboard.layoutHint')}</p>}
         </div>
         <div className={managerStyles.headerActions}>
           {showAnalytics && (
@@ -194,11 +165,6 @@ export function HomePage() {
                   <Map size={18} /> {t('nav.roomMap')}
                 </Button>
               </Link>
-              <Link to="/month-close">
-                <Button variant="surface">
-                  <CalendarCheck size={18} /> {t('nav.monthClose')}
-                </Button>
-              </Link>
               <Link to="/map-editor">
                 <Button variant="surface">
                   <Table2 size={18} /> {t('nav.mapEditor')}
@@ -206,24 +172,17 @@ export function HomePage() {
               </Link>
             </>
           )}
-          {showOperational && role === 'manager' && (
-            <>
-              <Link to="/map">
-                <Button variant="primary">
-                  <Map size={18} /> {t('nav.roomMap')}
-                </Button>
-              </Link>
-              <Link to="/month-close">
-                <Button variant="surface">
-                  <CalendarCheck size={18} /> {t('nav.monthClose')}
-                </Button>
-              </Link>
-            </>
+          {role === 'manager' && (
+            <Link to="/map">
+              <Button variant="primary">
+                <Map size={18} /> {t('nav.roomMap')}
+              </Button>
+            </Link>
           )}
         </div>
       </header>
 
-      {(showAnalytics || showOperational) && (
+      {showAnalytics && (
         <div className={styles.sectionsStack}>
           {layout.sections.map((sectionId) => {
             const block = sectionBlocks[sectionId];

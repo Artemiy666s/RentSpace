@@ -601,6 +601,11 @@ export const en: TranslationTree = {
     removeMonth: 'Remove {{month}}',
     loadError: 'Could not load the register.',
     openTenants: 'Tenants & contracts',
+    colTenant: 'Tenant name',
+    colContract: 'Contract number and date',
+    colArea: 'Occupied area',
+    colRate: 'Rent rate excl. VAT',
+    totalRow: 'TOTAL',
   },
   tenants: {
     title: 'Tenants & contracts',

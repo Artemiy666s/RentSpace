@@ -112,7 +112,7 @@ export function DashboardAnalyticsCharts({ data, chartOrder, onReorderCharts }: 
 
   const charts: Record<DashboardChartId, React.ReactNode> = {
     chargesVsPayments: (
-      <ChartBlock title={t('dashboard.chargesVsPayments')} to="/payments">
+      <ChartBlock title={t('dashboard.chargesVsPayments')} to="/rent-register">
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={chargesPaymentsData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#DDE7F0" />
@@ -157,7 +157,7 @@ export function DashboardAnalyticsCharts({ data, chartOrder, onReorderCharts }: 
       </ChartBlock>
     ),
     roomsByStatus: (
-      <ChartBlock title={t('dashboard.roomsByStatus')} to="/rooms">
+      <ChartBlock title={t('dashboard.roomsByStatus')} to="/map">
         {statusPieData.length ? (
           <ResponsiveContainer width="100%" height={240}>
             <PieChart>

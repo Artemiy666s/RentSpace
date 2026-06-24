@@ -21,7 +21,7 @@
     "import:kvartal": "npx cross-env NODE_ENV=development node scripts/import-kvartal.js",
     "db:full": "node scripts/reset-db.js && npx cross-env NODE_ENV=development knex migrate:latest --knexfile server/db/knexfile.js && npx cross-env NODE_ENV=development knex seed:run --knexfile server/db/knexfile.js && npx cross-env NODE_ENV=development node scripts/import-kvartal.js",
     "setup:db": "node scripts/setup-db.js",
-    "test": "node scripts/test-db.js && node scripts/test-api.js",
+    "test": "node scripts/test-db.js && node scripts/test-api.js && node scripts/test-floor-plan.js",
     "test:db": "node scripts/test-db.js",
     "test:api": "node scripts/test-api.js",
     "test:floor-plan": "node scripts/test-floor-plan.js"

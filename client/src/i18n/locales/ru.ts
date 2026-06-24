@@ -601,6 +601,11 @@ export const ru: TranslationTree = {
     removeMonth: 'Убрать {{month}}',
     loadError: 'Не удалось загрузить реестр.',
     openTenants: 'Арендаторы и договоры',
+    colTenant: 'Наименование арендатора',
+    colContract: 'Номер договора от числа',
+    colArea: 'Занимаемая площадь',
+    colRate: 'Арендная ставка без НДС',
+    totalRow: 'ИТОГО',
   },
   tenants: {
     title: 'Арендаторы и договоры',

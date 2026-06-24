@@ -28,7 +28,7 @@ export function RentRegisterPage() {
   const { propertyId, setPropertyId } = usePropertyStore();
   const [filterBuildingId, setFilterBuildingId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
-  const [selectedMonths, setSelectedMonths] = useState<number[]>(() => [new Date().getMonth() + 1]);
+  const [selectedMonths, setSelectedMonths] = useState<number[]>(() => [...ALL_MONTHS]);
   const [selectedRow, setSelectedRow] = useState<RegisterRow | null>(null);
 
   const { data: properties } = useQuery({
@@ -90,7 +90,7 @@ export function RentRegisterPage() {
       },
       {
         key: 'tenant',
-        title: t('common.tenant'),
+        title: t('rentRegister.colTenant'),
         width: '22%',
         sortable: true,
         sortValue: (r) => r.tenantName,
@@ -98,7 +98,7 @@ export function RentRegisterPage() {
       },
       {
         key: 'contract',
-        title: t('common.contract'),
+        title: t('rentRegister.colContract'),
         width: '18%',
         sortable: true,
         sortValue: (r) => r.contractLabel,
@@ -106,7 +106,7 @@ export function RentRegisterPage() {
       },
       {
         key: 'area',
-        title: t('common.area'),
+        title: t('rentRegister.colArea'),
         align: 'right',
         width: '10%',
         sortable: true,
@@ -116,7 +116,7 @@ export function RentRegisterPage() {
       },
       {
         key: 'rate',
-        title: t('common.rateWithoutVat'),
+        title: t('rentRegister.colRate'),
         align: 'right',
         width: '10%',
         sortable: true,
@@ -194,6 +194,27 @@ export function RentRegisterPage() {
     accessors,
     { nameKey: 'tenant' }
   );
+
+  const totals = useMemo(() => {
+    const rows = data?.rows ?? [];
+    const monthTotals: Record<number, { rent: number; utility: number }> = {};
+    for (const m of selectedMonths) {
+      monthTotals[m] = rows.reduce(
+        (acc, row) => {
+          acc.rent += row.months[m]?.rent ?? 0;
+          acc.utility += row.months[m]?.utility ?? 0;
+          return acc;
+        },
+        { rent: 0, utility: 0 }
+      );
+    }
+    return {
+      monthTotals,
+      totalRent: rows.reduce((s, r) => s + (r.totalRent ?? 0), 0),
+      totalUtil: rows.reduce((s, r) => s + (r.totalUtil ?? 0), 0),
+      debt: rows.reduce((s, r) => s + (r.debt ?? 0), 0),
+    };
+  }, [data?.rows, selectedMonths]);
 
   const exportParams = {
     propertyId: pid,
@@ -311,15 +332,42 @@ export function RentRegisterPage() {
       {isLoading ? (
         <p>{t('common.loading')}</p>
       ) : (
-        <DataTable
-          columns={columns}
-          rows={sortedRows}
-          rowKey={(r) => r.rowNum}
-          onRowClick={setSelectedRow}
-          sortKey={sortKey}
-          sortDirection={sortDirection}
-          onSort={handleSort}
-        />
+        <>
+          <DataTable
+            columns={columns}
+            rows={sortedRows}
+            rowKey={(r) => r.rowNum}
+            onRowClick={setSelectedRow}
+            sortKey={sortKey}
+            sortDirection={sortDirection}
+            onSort={handleSort}
+          />
+          {sortedRows.length > 0 && (
+            <div className={styles.totalsWrap}>
+              <table className={styles.totalsTable}>
+                <tbody>
+                  <tr>
+                    <td className={styles.totalsLabel} colSpan={5}>
+                      {t('rentRegister.totalRow')}
+                    </td>
+                    {selectedMonths.flatMap((m) => [
+                      <td key={`tr-${m}`} className={styles.totalsNum}>
+                        {totals.monthTotals[m]?.rent.toFixed(2)}
+                      </td>,
+                      <td key={`tu-${m}`} className={styles.totalsNum}>
+                        {totals.monthTotals[m]?.utility.toFixed(2)}
+                      </td>,
+                    ])}
+                    <td className={styles.totalsNum}>{totals.totalRent.toFixed(2)}</td>
+                    <td className={styles.totalsNum}>{totals.totalUtil.toFixed(2)}</td>
+                    <td className={styles.totalsNum}>{totals.debt.toFixed(2)}</td>
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       <RentRegisterRowModal

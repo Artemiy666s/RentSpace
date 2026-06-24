@@ -601,6 +601,11 @@ export const be: TranslationTree = {
     removeMonth: 'Выдаліць {{month}}',
     loadError: 'Не ўдалося загрузіць рэестр.',
     openTenants: 'Арандатары і дагаворы',
+    colTenant: 'Найменне арандатара',
+    colContract: 'Нумар дагавора ад даты',
+    colArea: 'Займаемая плошча',
+    colRate: 'Арандная стаўка без ПДВ',
+    totalRow: 'РАЗАМ',
   },
   tenants: {
     title: 'Арандатары і дагаворы',

@@ -110,6 +110,22 @@ async function run() {
     assert(body?.data?.kpis != null, 'no kpis');
   });
 
+  await test('GET /api/manager/rent-register', async () => {
+    assert(token, 'no auth token');
+    const year = new Date().getFullYear();
+    const { status, body } = await request(
+      `/api/manager/rent-register?propertyId=${global.propertyId}&year=${year}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert(status === 200, `status ${status}`);
+    assert(Array.isArray(body?.data?.rows), 'rows not array');
+    if (body.data.rows.length > 0) {
+      const row = body.data.rows[0];
+      assert(row.tenantName != null, 'missing tenantName');
+      assert(row.months != null, 'missing months map');
+    }
+  });
+
   await test('GET / — frontend index', async () => {
     const res = await fetch(`${BASE}/`);
     assert(res.status === 200, `status ${res.status}`);

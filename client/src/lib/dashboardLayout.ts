@@ -67,12 +67,7 @@ export const DEFAULT_PANEL_ORDER_OPERATIONAL: DashboardPanelId[] = [
   'activity',
 ];
 
-export const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
-  'kpis',
-  'charts',
-  'quickActions',
-  'panels',
-];
+export const DEFAULT_SECTION_ORDER: DashboardSectionId[] = ['kpis', 'charts'];
 
 const STORAGE_PREFIX = 'rentspace-home-layout';
 
@@ -125,11 +120,6 @@ export function buildLayoutScope(options: {
   if (showAnalytics) {
     allowedSections.add('kpis');
     allowedSections.add('charts');
-    allowedSections.add('panels');
-  }
-  if (showOperational) {
-    allowedSections.add('quickActions');
-    allowedSections.add('panels');
   }
   if (!showAnalytics && showOperational) {
     allowedSections.delete('kpis');
@@ -141,27 +131,13 @@ export function buildLayoutScope(options: {
   );
 
   const allowedPanels = new Set<DashboardPanelId>();
-  if (showAnalytics) {
-    DEFAULT_PANEL_ORDER_ANALYTICS.forEach((id) => allowedPanels.add(id));
-  }
-  if (showOperational) {
-    DEFAULT_PANEL_ORDER_OPERATIONAL.forEach((id) => allowedPanels.add(id));
-  }
-
-  const allowedQuickActions = new Set<DashboardQuickActionId>(
-    showOperational ? DEFAULT_QUICK_ACTION_ORDER : []
-  );
+  const allowedQuickActions = new Set<DashboardQuickActionId>();
 
   const defaultSections: DashboardSectionId[] = [];
   if (allowedSections.has('kpis')) defaultSections.push('kpis');
   if (allowedSections.has('charts')) defaultSections.push('charts');
-  if (allowedSections.has('quickActions')) defaultSections.push('quickActions');
-  if (allowedSections.has('panels')) defaultSections.push('panels');
 
-  const defaultPanels = [
-    ...(showAnalytics ? DEFAULT_PANEL_ORDER_ANALYTICS : []),
-    ...(showOperational ? DEFAULT_PANEL_ORDER_OPERATIONAL : []),
-  ];
+  const defaultPanels: DashboardPanelId[] = [];
 
   return {
     allowedSections,
@@ -171,7 +147,7 @@ export function buildLayoutScope(options: {
     defaultSections,
     defaultCharts: [...DEFAULT_CHART_ORDER],
     defaultPanels,
-    defaultQuickActions: [...DEFAULT_QUICK_ACTION_ORDER],
+    defaultQuickActions: [] as DashboardQuickActionId[],
   };
 }
 

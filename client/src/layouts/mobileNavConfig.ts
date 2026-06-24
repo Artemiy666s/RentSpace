@@ -1,10 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Map,
-  Building2,
   Users,
-  CreditCard,
-  FileText,
   BarChart3,
   Settings,
   ClipboardList,
@@ -12,8 +9,6 @@ import {
   Receipt,
   TrendingUp,
   Wallet,
-  CalendarCheck,
-  Database,
 } from 'lucide-react';
 
 export type NavItemDef = {
@@ -23,6 +18,7 @@ export type NavItemDef = {
   roles: string[];
 };
 
+/** Упрощённое меню под заказчика: без помещений, платежей, начислений, закрытия месяца и «всех данных». */
 export const NAV_ITEMS: NavItemDef[] = [
   {
     to: '/manager',
@@ -43,28 +39,10 @@ export const NAV_ITEMS: NavItemDef[] = [
     roles: ['manager', 'accountant', 'owner', 'director', 'org_admin', 'super_admin'],
   },
   {
-    to: '/rooms',
-    icon: Building2,
-    labelKey: 'nav.rooms',
-    roles: ['manager', 'owner', 'director', 'org_admin', 'super_admin', 'accountant', 'viewer'],
-  },
-  {
     to: '/rent-register',
     icon: Receipt,
     labelKey: 'nav.rentRegister',
     roles: ['manager', 'accountant', 'owner', 'director', 'org_admin', 'super_admin'],
-  },
-  {
-    to: '/payments',
-    icon: CreditCard,
-    labelKey: 'nav.payments',
-    roles: ['accountant', 'manager', 'owner', 'director', 'org_admin', 'super_admin'],
-  },
-  {
-    to: '/charges',
-    icon: FileText,
-    labelKey: 'nav.charges',
-    roles: ['accountant', 'org_admin', 'super_admin', 'manager', 'director'],
   },
   {
     to: '/expenses',
@@ -77,18 +55,6 @@ export const NAV_ITEMS: NavItemDef[] = [
     icon: TrendingUp,
     labelKey: 'nav.planFact',
     roles: ['manager', 'owner', 'director', 'accountant', 'org_admin', 'super_admin'],
-  },
-  {
-    to: '/month-close',
-    icon: CalendarCheck,
-    labelKey: 'nav.monthClose',
-    roles: ['manager', 'director', 'org_admin', 'super_admin'],
-  },
-  {
-    to: '/manager-data',
-    icon: Database,
-    labelKey: 'nav.allData',
-    roles: ['manager', 'director', 'org_admin', 'super_admin'],
   },
   {
     to: '/reports',
@@ -110,14 +76,11 @@ export const NAV_ITEMS: NavItemDef[] = [
   },
 ];
 
-/** Порядок вкладок в нижней панели (до 4 шт., остальное — «Ещё»). */
 export const MOBILE_TAB_PRIORITY = [
   '/manager',
   '/map',
   '/tenants-contracts',
-  '/rooms',
   '/rent-register',
-  '/payments',
 ] as const;
 
 export const ROUTE_TITLE_KEYS: Record<string, string> = {
@@ -125,15 +88,10 @@ export const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/dashboard': 'nav.home',
   '/map': 'nav.roomMap',
   '/map-editor': 'nav.mapEditor',
-  '/rooms': 'nav.rooms',
   '/tenants-contracts': 'nav.tenants',
   '/rent-register': 'nav.rentRegister',
-  '/payments': 'nav.payments',
-  '/charges': 'nav.charges',
   '/expenses': 'nav.expenses',
   '/plan-fact': 'nav.planFact',
-  '/month-close': 'nav.monthClose',
-  '/manager-data': 'nav.allData',
   '/reports': 'nav.reports',
   '/settings': 'nav.settings',
 };
