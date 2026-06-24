@@ -276,17 +276,23 @@ export function MapEditorPage() {
 
   const uploadPlan = useMutation({
     mutationFn: async (file: File) => {
+      if (!fid) throw new Error(t('common.stepFloor'));
       const dim = await readImageFileDimensions(file);
       const fd = new FormData();
       fd.append('image', file);
       fd.append('width', String(dim.width));
       fd.append('height', String(dim.height));
-      await api.post(`/floors/${fid}/plan`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await api.post(`/floors/${fid}/plan`, fd);
+      return res.data.data as FloorPlanData['plan'];
     },
-    onSuccess: () => {
-      invalidate();
+    onSuccess: (savedPlan) => {
+      qc.setQueryData(['floorPlan', fid], (prev: FloorPlanData | undefined) => ({
+        plan: savedPlan,
+        shapes: prev?.shapes ?? [],
+        rooms: prev?.rooms ?? [],
+        floorRooms: prev?.floorRooms ?? [],
+      }));
+      void refetchPlan();
       setUploadPreview(null);
       setPendingPlanFile(null);
       showFeedback('success', t('mapEditor.planSaved'));
@@ -751,8 +757,14 @@ export function MapEditorPage() {
               )}
               {feedback && (
                 <div
-                  className={feedback.type === 'error' ? styles.alert : styles.planMeta}
-                  role={feedback.type === 'error' ? 'alert' : undefined}
+                  className={
+                    feedback.type === 'error'
+                      ? styles.alert
+                      : feedback.type === 'success'
+                        ? `${styles.feedback} ${styles.feedbackSuccess}`
+                        : styles.planMeta
+                  }
+                  role={feedback.type === 'error' ? 'alert' : 'status'}
                 >
                   {feedback.text}
                 </div>
@@ -767,6 +779,7 @@ export function MapEditorPage() {
                   <img
                     className={styles.previewThumb}
                     src={plan.imageUrl}
+                    key={plan.imageUrl}
                     alt={t('common.floorPlan')}
                   />
                   <div className={styles.actions}>

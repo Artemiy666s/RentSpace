@@ -100,6 +100,7 @@ async function getActivePlan(floorId) {
   return db('floor_plans')
     .where({ floor_id: floorId, is_active: true })
     .orderBy('version', 'desc')
+    .select(PLAN_META_COLUMNS)
     .first();
 }
 
@@ -295,8 +296,8 @@ router.post(
       delete fallbackPayload.image_mime;
       [id] = await db('floor_plans').insert(fallbackPayload);
     }
-    const plan = await db('floor_plans').where({ id }).first();
-    ok(res, { ...plan, imageUrl: planImageHref(plan) }, 201);
+    const plan = await db('floor_plans').where({ id }).select(PLAN_META_COLUMNS).first();
+    ok(res, toPublicPlan(plan), 201);
   })
 );
 
