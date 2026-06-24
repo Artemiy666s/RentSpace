@@ -27,6 +27,8 @@ interface Props<T> {
   sortKey?: string | null;
   sortDirection?: SortDirection;
   onSort?: (key: string) => void;
+  /** Одна строка итогов — ячейки в том же порядке, что и columns */
+  footerCells?: ReactNode[];
 }
 
 function alignClass(align?: 'left' | 'right' | 'center') {
@@ -44,6 +46,7 @@ export function DataTable<T>({
   sortKey = null,
   sortDirection = 'asc',
   onSort,
+  footerCells,
 }: Props<T>) {
   const { t } = useI18n();
   const empty = emptyText ?? t('common.noData');
@@ -142,6 +145,27 @@ export function DataTable<T>({
               ))
             )}
           </tbody>
+          {footerCells && footerCells.length === columns.length && (
+            <tfoot>
+              <tr className={styles.footerRow}>
+                {columns.map((c, i) => (
+                  <td key={c.key} className={alignClass(c.align ?? 'left')}>
+                    <div
+                      className={`${styles.cellInner} ${
+                        c.align === 'right'
+                          ? styles.cellInnerRight
+                          : c.align === 'center'
+                            ? styles.cellInnerCenter
+                            : styles.cellInnerLeft
+                      } ${styles.footerCell}`}
+                    >
+                      {footerCells[i]}
+                    </div>
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>

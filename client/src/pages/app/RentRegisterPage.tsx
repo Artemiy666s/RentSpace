@@ -223,6 +223,28 @@ export function RentRegisterPage() {
     };
   }, [data?.rows, selectedMonths]);
 
+  const footerCells = useMemo(() => {
+    if (!sortedRows.length) return undefined;
+    return columns.map((col) => {
+      if (col.key === 'tenant') return t('rentRegister.totalRow');
+      if (col.key === 'n' || col.key === 'contract' || col.key === 'area' || col.key === 'rate' || col.key === 'status') {
+        return '';
+      }
+      if (col.key.startsWith('r')) {
+        const m = Number(col.key.slice(1));
+        return totals.monthTotals[m]?.rent.toFixed(2) ?? '0.00';
+      }
+      if (col.key.startsWith('u')) {
+        const m = Number(col.key.slice(1));
+        return totals.monthTotals[m]?.utility.toFixed(2) ?? '0.00';
+      }
+      if (col.key === 'totalRent') return totals.totalRent.toFixed(2);
+      if (col.key === 'totalUtil') return totals.totalUtil.toFixed(2);
+      if (col.key === 'debt') return totals.debt.toFixed(2);
+      return '';
+    });
+  }, [columns, sortedRows.length, totals, t]);
+
   const exportParams = {
     propertyId: pid,
     year,
@@ -339,42 +361,16 @@ export function RentRegisterPage() {
       {isLoading ? (
         <p>{t('common.loading')}</p>
       ) : (
-        <>
-          <DataTable
-            columns={columns}
-            rows={sortedRows}
-            rowKey={(r) => r.rowNum}
-            onRowClick={setSelectedRow}
-            sortKey={sortKey}
-            sortDirection={sortDirection}
-            onSort={handleSort}
-          />
-          {sortedRows.length > 0 && (
-            <div className={styles.totalsWrap}>
-              <table className={styles.totalsTable}>
-                <tbody>
-                  <tr>
-                    <td className={styles.totalsLabel} colSpan={5}>
-                      {t('rentRegister.totalRow')}
-                    </td>
-                    {selectedMonths.flatMap((m) => [
-                      <td key={`tr-${m}`} className={styles.totalsNum}>
-                        {totals.monthTotals[m]?.rent.toFixed(2)}
-                      </td>,
-                      <td key={`tu-${m}`} className={styles.totalsNum}>
-                        {totals.monthTotals[m]?.utility.toFixed(2)}
-                      </td>,
-                    ])}
-                    <td className={styles.totalsNum}>{totals.totalRent.toFixed(2)}</td>
-                    <td className={styles.totalsNum}>{totals.totalUtil.toFixed(2)}</td>
-                    <td className={styles.totalsNum}>{totals.debt.toFixed(2)}</td>
-                    <td />
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
+        <DataTable
+          columns={columns}
+          rows={sortedRows}
+          rowKey={(r) => r.rowNum}
+          onRowClick={setSelectedRow}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onSort={handleSort}
+          footerCells={footerCells}
+        />
       )}
 
       <RentRegisterRowModal

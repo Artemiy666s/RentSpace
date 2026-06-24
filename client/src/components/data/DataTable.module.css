@@ -162,6 +162,22 @@
   color: var(--color-muted);
 }
 
+.footerRow td {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 12px 14px;
+  font-weight: 700;
+  background: var(--color-table-head-bg);
+  border-top: 2px solid var(--color-border);
+  border-bottom: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.footerCell {
+  color: var(--color-navy);
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;

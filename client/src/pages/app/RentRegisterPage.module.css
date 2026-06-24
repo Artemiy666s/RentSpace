@@ -110,31 +110,3 @@
   color: var(--color-danger);
   margin-bottom: 12px;
 }
-
-.totalsWrap {
-  margin-top: -1px;
-  overflow-x: auto;
-  border: 1px solid var(--color-border);
-  border-radius: 0 0 12px 12px;
-  background: var(--color-table-head-bg);
-}
-
-.totalsTable {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.totalsLabel {
-  padding: 12px 14px;
-  text-align: right;
-  color: var(--color-text);
-}
-
-.totalsNum {
-  padding: 12px 14px;
-  text-align: right;
-  white-space: nowrap;
-  color: var(--color-text);
-}
