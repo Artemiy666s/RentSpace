@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm install",
+  "installCommand": "npm install && npm install --prefix client --include=dev",
   "buildCommand": "npm run restore:production",
   "outputDirectory": "server/public",
   "rewrites": [

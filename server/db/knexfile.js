@@ -1,17 +1,18 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
-const useSsl = process.env.DB_SSL === 'true';
+const dbHost = process.env.DB_HOST || process.env.TIDB_HOST || 'localhost';
+const useSsl = process.env.DB_SSL === 'true' || (!!process.env.TIDB_HOST && process.env.DB_SSL !== 'false');
 const isVercel = !!process.env.VERCEL;
 
 const base = {
   client: 'mysql2',
   connection: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '3306', 10),
-    database: process.env.DB_NAME || 'rent_space',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
+    host: dbHost,
+    port: parseInt(process.env.DB_PORT || process.env.TIDB_PORT || '3306', 10),
+    database: process.env.DB_NAME || process.env.TIDB_DATABASE || 'rent_space',
+    user: process.env.DB_USER || process.env.TIDB_USER || 'root',
+    password: process.env.DB_PASSWORD || process.env.TIDB_PASSWORD || '',
     charset: 'utf8mb4',
     ...(useSsl ? { ssl: { rejectUnauthorized: true } } : {}),
   },
