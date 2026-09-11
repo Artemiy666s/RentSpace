@@ -2,7 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const dbHost = process.env.DB_HOST || process.env.TIDB_HOST || 'localhost';
-const useSsl = process.env.DB_SSL === 'true' || (!!process.env.TIDB_HOST && process.env.DB_SSL !== 'false');
+const useSsl = process.env.DB_SSL === 'true';
 const isVercel = !!process.env.VERCEL;
 
 const base = {
