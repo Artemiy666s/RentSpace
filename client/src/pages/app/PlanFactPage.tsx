@@ -23,14 +23,12 @@ interface PfCell {
   fact: number | null;
   planEditable?: boolean;
   factEditable?: boolean;
-  factAuto?: boolean;
 }
 
 interface PfRow {
   code: string;
   name: string;
   unit: string;
-  autoFact?: boolean;
   custom?: boolean;
   deletable?: boolean;
   values: Record<number, PfCell>;
@@ -45,8 +43,6 @@ interface EditCell {
   unit: string;
   field: EditField;
   value: string;
-  factAuto: boolean;
-  autoFact: boolean;
 }
 
 interface RowEditForm {
@@ -99,14 +95,11 @@ function renderValueCell(
         clickable
           ? field === 'plan'
             ? t('planFact.clickPlan')
-            : cell.factAuto
-              ? t('planFact.clickFactAuto')
-              : t('planFact.clickFact')
+            : t('planFact.clickFact')
           : undefined
       }
     >
       {str}
-      {field === 'fact' && cell.factAuto ? <span className={styles.autoBadge}>A</span> : null}
     </span>
   );
 }
@@ -160,8 +153,6 @@ export function PlanFactPage() {
         const trimmed = editCell.value.trim();
         if (trimmed && parsePfNumberInput(trimmed) === null) throw new Error('invalid');
         payload.planValue = parsePfNumberInput(trimmed);
-      } else if (editCell.value.trim() === '' && editCell.autoFact) {
-        payload.clearFact = true;
       } else {
         const trimmed = editCell.value.trim();
         if (trimmed && parsePfNumberInput(trimmed) === null) throw new Error('invalid');
@@ -334,8 +325,6 @@ export function PlanFactPage() {
       unit: row.unit,
       field,
       value: raw != null ? String(raw) : '',
-      factAuto: !!cell.factAuto,
-      autoFact: !!row.autoFact,
     });
   };
 
@@ -573,18 +562,9 @@ export function PlanFactPage() {
         </div>
       )}
 
-      <p className={styles.hint}>
-        {t('planFact.tableHint')}{' '}
-        <span className={styles.autoBadge}>A</span> — {t('planFact.autoBadgeLegend')}
-      </p>
+      <p className={styles.hint}>{t('planFact.tableHint')}</p>
 
       <Modal open={!!editCell} title={editTitle} onClose={() => setEditCell(null)}>
-        {editCell?.field === 'fact' && editCell.factAuto && (
-          <p className={styles.modalHint}>{t('planFact.factAutoHint')}</p>
-        )}
-        {editCell?.field === 'fact' && editCell.autoFact && (
-          <p className={styles.modalHint}>{t('planFact.clearFactHint')}</p>
-        )}
         <Input
           label={valueLabel}
           type="number"

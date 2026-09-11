@@ -615,14 +615,14 @@ async function listRentRegister(propertyId, year, buildingId) {
 }
 
 const PLAN_FACT_METRICS = [
-  { code: 'rent_current', name: 'Аренда текущая, руб. с НДС', unit: 'BYN', autoFact: true },
-  { code: 'utilities_fact', name: 'Возмещение коммунальных услуг', unit: 'BYN', autoFact: true },
-  { code: 'expenses_fact', name: 'Затраты по объекту', unit: 'BYN', autoFact: true },
-  { code: 'new_tenants', name: 'Новые арендные места / арендаторы', unit: 'шт.', autoFact: true },
-  { code: 'terminated_contracts', name: 'Расторгнутые договоры аренды', unit: 'шт.', autoFact: true },
-  { code: 'new_rent_amount', name: 'Аренда от новых арендных мест, руб. с НДС', unit: 'BYN', autoFact: true },
-  { code: 'free_area_start', name: 'Количество свободных площадей — начало месяца', unit: 'м²', autoFact: true },
-  { code: 'free_area_end', name: 'Количество свободных площадей — конец месяца', unit: 'м²', autoFact: true },
+  { code: 'rent_current', name: 'Аренда текущая, руб. с НДС', unit: 'BYN' },
+  { code: 'utilities_fact', name: 'Возмещение коммунальных услуг', unit: 'BYN' },
+  { code: 'expenses_fact', name: 'Затраты по объекту', unit: 'BYN' },
+  { code: 'new_tenants', name: 'Новые арендные места / арендаторы', unit: 'шт.' },
+  { code: 'terminated_contracts', name: 'Расторгнутые договоры аренды', unit: 'шт.' },
+  { code: 'new_rent_amount', name: 'Аренда от новых арендных мест, руб. с НДС', unit: 'BYN' },
+  { code: 'free_area_start', name: 'Количество свободных площадей — начало месяца', unit: 'м²' },
+  { code: 'free_area_end', name: 'Количество свободных площадей — конец месяца', unit: 'м²' },
 ];
 
 const PLAN_FACT_METRIC_BY_CODE = Object.fromEntries(PLAN_FACT_METRICS.map((m) => [m.code, m]));
@@ -745,29 +745,6 @@ function resolvePlanValue(metricCode, month, storedMap, stored) {
     if (duplicateNameMatchesMetricCode(metricCode, s.metric_name)) return v;
   }
   return null;
-}
-
-function resolveAutoFact(metricCode, month, ctx) {
-  switch (metricCode) {
-    case 'rent_fact':
-    case 'rent_current':
-      return ctx.rentByMonth[month] || 0;
-    case 'utilities_fact':
-      return ctx.utilByMonth[month] || 0;
-    case 'expenses_fact':
-      return ctx.expByMonth[month] || 0;
-    case 'new_tenants':
-      return ctx.newContractsByMonth[month] || 0;
-    case 'terminated_contracts':
-      return ctx.terminatedByMonth[month] || 0;
-    case 'new_rent_amount':
-      return ctx.newRentByMonth[month] || 0;
-    case 'free_area_start':
-    case 'free_area_end':
-      return ctx.freeArea;
-    default:
-      return null;
-  }
 }
 
 async function upsertPlanFactCell(organizationId, propertyId, year, month, metricCode, { planValue, factValue }) {
@@ -979,7 +956,6 @@ async function getPlanFactMatrix(propertyId, year) {
             code: row.metric_code,
             name: row.metric_name,
             unit: row.unit || 'BYN',
-            autoFact: false,
             custom: true,
           };
         }
@@ -1011,102 +987,19 @@ async function getPlanFactMatrix(propertyId, year) {
     storedMap[`${s.metric_code}-${s.period_month}`] = s;
   }
 
-  const rentFacts = await db('rent_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .whereNot('status', 'cancelled')
-    .groupBy('period_month')
-    .sum('amount_with_vat as total')
-    .select('period_month');
-
-  const utilFacts = await db('utility_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .groupBy('period_month')
-    .sum('amount as total')
-    .select('period_month');
-
-  const expenseFacts = await db('expenses')
-    .where({ property_id: propertyId, period_year: year })
-    .groupBy('period_month')
-    .sum('amount as total')
-    .select('period_month');
-
-  const rentByMonth = Object.fromEntries(rentFacts.map((r) => [r.period_month, Number(r.total)]));
-  const utilByMonth = Object.fromEntries(utilFacts.map((r) => [r.period_month, Number(r.total)]));
-  const expByMonth = Object.fromEntries(expenseFacts.map((r) => [r.period_month, Number(r.total)]));
-
-  const freeStatuses = ['free', 'ready_for_rent', 'repair', 'not_available'];
-  const freeAreaTotal = await db('rooms')
-    .where({ property_id: propertyId })
-    .whereIn('status', freeStatuses)
-    .whereNull('deleted_at')
-    .sum('area as total')
-    .first();
-  const freeArea = Number(freeAreaTotal?.total || 0);
-
-  const newContractsByMonth = {};
-  const terminatedByMonth = {};
-  const newRentByMonth = {};
-  for (let m = 1; m <= 12; m++) {
-    const start = dayjs(`${year}-${m}-01`).format('YYYY-MM-DD');
-    const end = dayjs(`${year}-${m}-01`).endOf('month').format('YYYY-MM-DD');
-    const newCnt = await db('contracts')
-      .where({ property_id: propertyId })
-      .where('start_date', '>=', start)
-      .where('start_date', '<=', end)
-      .count('id as c')
-      .first();
-    const termCnt = await db('contracts')
-      .where({ property_id: propertyId })
-      .where('actual_end_date', '>=', start)
-      .where('actual_end_date', '<=', end)
-      .count('id as c')
-      .first();
-    newContractsByMonth[m] = Number(newCnt?.c || 0);
-    terminatedByMonth[m] = Number(termCnt?.c || 0);
-    const newContractIds = await db('contracts')
-      .where({ property_id: propertyId })
-      .where('start_date', '>=', start)
-      .where('start_date', '<=', end)
-      .pluck('id');
-    let newRentSum = 0;
-    if (newContractIds.length) {
-      const newRent = await db('rent_charges')
-        .where({ property_id: propertyId, period_year: year, period_month: m })
-        .whereNot('status', 'cancelled')
-        .whereIn('contract_id', newContractIds)
-        .sum('amount_with_vat as total')
-        .first();
-      newRentSum = Number(newRent?.total || 0);
-    }
-    newRentByMonth[m] = newRentSum;
-  }
-
-  const autoCtx = {
-    rentByMonth,
-    utilByMonth,
-    expByMonth,
-    newContractsByMonth,
-    terminatedByMonth,
-    newRentByMonth,
-    freeArea,
-  };
-
   const rows = metrics.map((metric) => {
     const values = {};
     for (let m = 1; m <= 12; m++) {
       const key = `${metric.code}-${m}`;
       const storedRow = storedMap[key];
       const plan = resolvePlanValue(metric.code, m, storedMap, stored);
-      const hasManualFact = storedRow?.fact_value != null;
-      const autoFact = resolveAutoFact(metric.code, m, autoCtx);
-      const fact = hasManualFact ? Number(storedRow.fact_value) : autoFact;
+      const fact = storedRow?.fact_value != null ? Number(storedRow.fact_value) : null;
 
       values[m] = {
         plan,
         fact,
         planEditable: true,
         factEditable: true,
-        factAuto: metric.autoFact && !hasManualFact,
       };
     }
     return {
