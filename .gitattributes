@@ -1,0 +1,7 @@
+# Keep deployed frontend bytes exact (do not convert EOL)
+backups/production-current/assets/** binary
+backups/production-rentspace-site-*/assets/** binary
+server/public/assets/** binary
+backups/production-current/index.html text eol=lf
+backups/production-rentspace-site-*/index.html text eol=lf
+server/public/index.html text eol=lf

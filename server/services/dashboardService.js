@@ -108,6 +108,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
       totalArea,
       occupiedArea,
       freeArea,
+      freeRentableArea: freeArea,
       occupancy,
       rentMonth: charged,
       debt,

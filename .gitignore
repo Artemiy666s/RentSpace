@@ -1,10 +1,10 @@
 node_modules/
 client/node_modules/
 .env
-server/public/*
-!server/public/.gitkeep
+# server/public is tracked: canonical production frontend from rentspace.site
 server/uploads/*
 !server/uploads/.gitkeep
+client/dist/
 dist/
 *.log
 .DS_Store
