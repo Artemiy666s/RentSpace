@@ -6,6 +6,7 @@ const { listTenantContractOverview } = require('../services/managerDataService')
 const { buildTenantContractsWorkbook } = require('../services/reportService');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, fail } = require('../utils/response');
+const { normalizeLegalTypeForDb } = require('../utils/legalType');
 
 const router = express.Router();
 router.use(authenticate, requireOrgAccess());
@@ -110,15 +111,15 @@ router.post(
     const [id] = await db('tenants').insert({
       organization_id: orgId,
       name,
-      legal_type: req.body.legalType || 'other',
-      unp: req.body.unp,
-      contact_person: req.body.contactPerson,
-      phone: req.body.phone,
-      email: req.body.email,
-      legal_address: req.body.legalAddress,
-      activity_type: req.body.activityType,
+      legal_type: normalizeLegalTypeForDb(req.body.legalType),
+      unp: req.body.unp || null,
+      contact_person: req.body.contactPerson || null,
+      phone: req.body.phone || null,
+      email: req.body.email || null,
+      legal_address: req.body.legalAddress || null,
+      activity_type: req.body.activityType || null,
       status: 'active',
-      comment: req.body.comment,
+      comment: req.body.comment || null,
     });
     ok(res, { id }, 201);
   })
@@ -136,6 +137,9 @@ router.put(
     for (const [k, v] of Object.entries(req.body)) {
       const col = map[k] || k;
       if (fields.includes(col)) upd[col] = v;
+    }
+    if (upd.legal_type != null) {
+      upd.legal_type = normalizeLegalTypeForDb(upd.legal_type);
     }
     if (req.body.name != null) {
       const name = String(req.body.name).trim();

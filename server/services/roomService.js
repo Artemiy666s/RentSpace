@@ -2,6 +2,7 @@ const dayjs = require('dayjs');
 const { db } = require('../db');
 const { logAudit, logActivity } = require('../utils/audit');
 const { recordRoomStatusChange } = require('../utils/roomStatusHistory');
+const { normalizeLegalTypeForDb } = require('../utils/legalType');
 
 async function getRoomDetails(roomId) {
   const room = await db('rooms').whereNull('deleted_at').where({ id: roomId }).first();
@@ -167,13 +168,13 @@ async function rentOutRoom({
     const [tid] = await db('tenants').insert({
       organization_id: organizationId,
       name: tenantPayload.name,
-      legal_type: tenantPayload.legalType || 'other',
-      unp: tenantPayload.unp,
-      contact_person: tenantPayload.contactPerson,
-      phone: tenantPayload.phone,
-      email: tenantPayload.email,
+      legal_type: normalizeLegalTypeForDb(tenantPayload.legalType),
+      unp: tenantPayload.unp || null,
+      contact_person: tenantPayload.contactPerson || null,
+      phone: tenantPayload.phone || null,
+      email: tenantPayload.email || null,
       status: 'active',
-      comment: tenantPayload.comment,
+      comment: tenantPayload.comment || null,
     });
     resolvedTenantId = tid;
   }
