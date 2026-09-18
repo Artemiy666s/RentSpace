@@ -2,43 +2,15 @@ const dayjs = require('dayjs');
 const { db } = require('../db');
 const { getMonthReadiness } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
-
-/** Аренда / коммуналка: порог числа месяца (включительно). */
-const CHARGE_DAY = 15;
+const { maxDueRentMonth, maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
 /**
- * До какого месяца года аренда уже «наступила» для задолженности.
- * Аренда за месяц M — после 15-го числа месяца M.
- */
-function maxDueRentMonth(year, asOf = dayjs()) {
-  const y = Number(year);
-  if (asOf.year() > y) return 12;
-  if (asOf.year() < y) return 0;
-  if (asOf.date() >= CHARGE_DAY) return asOf.month() + 1;
-  return asOf.month(); // 0 в январе до 15-го → долга по этому году ещё нет
-}
-
-/**
- * До какого месяца года коммуналка уже показывается.
- * Коммуналка за месяц M — только после 15-го числа месяца M+1
- * (сент. → после 15 окт.; на 18 сент. видны август и раньше).
- */
-function maxDueUtilityMonth(year, asOf = dayjs()) {
-  const cutoff =
-    asOf.date() >= CHARGE_DAY ? asOf.subtract(1, 'month') : asOf.subtract(2, 'month');
-  if (cutoff.year() > Number(year)) return 12;
-  if (cutoff.year() < Number(year)) return 0;
-  return cutoff.month() + 1;
-}
-
-/**
- * Задолженность по аренде (без коммуналки) + отдельный блок коммунальных.
- * Договоры как в реестре, но только месяцы, по которым аренда уже начислена
- * (после 15-го числа периода). Будущие месяцы в KPI не входят.
+ * Задолженность по аренде + коммунальные.
+ * Цифры совпадают с реестром «Аренда по счетам» (те же договоры и правила 15-го числа).
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows = registerRowsPreloaded || (await listRentRegister(propertyId, year));
@@ -48,8 +20,11 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   const debtBreakdown = [];
 
   for (const row of registerRows) {
-    // Годовые оплаты аренды по договору (как в реестре: totalRent − debt).
-    let paidLeft = Math.max(0, roundMoney((row.totalRent || 0) - (row.debt || 0)));
+    let yearPaid = 0;
+    for (let m = 1; m <= 12; m++) {
+      yearPaid += Number(row.months?.[m]?.paid || 0);
+    }
+    let paidLeft = roundMoney(yearPaid);
 
     let contractDebt = 0;
     const months = [];
@@ -65,13 +40,15 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
       monthTotals[m] = (monthTotals[m] || 0) + debt;
     }
 
-    if (contractDebt <= 0.005) continue;
+    // Итог по договору — как колонка «Задолженность» в реестре
+    const registerDebt = roundMoney(row.debt || 0);
+    if (registerDebt <= 0.005) continue;
 
     debtBreakdown.push({
       contractId: row.contractId,
       tenantName: row.tenantName || '—',
       contractNumber: row.contractLabel || String(row.contractId),
-      debt: contractDebt,
+      debt: registerDebt,
       months: months.sort((a, b) => b.month - a.month),
     });
   }
@@ -87,7 +64,7 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     .filter((row) => row.amount > 0.005)
     .sort((a, b) => b.month - a.month);
 
-  const debt = roundMoney(debtBreakdown.reduce((s, row) => s + row.debt, 0));
+  const debt = roundMoney(registerRows.reduce((s, row) => s + Number(row.debt || 0), 0));
 
   const utilDueThrough = maxDueUtilityMonth(year);
   const utilMonths = [];
@@ -101,12 +78,7 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     charged = roundMoney(charged);
     paid = roundMoney(paid);
     if (!charged && !paid) continue;
-    utilMonths.push({
-      year,
-      month: m,
-      charged,
-      paid,
-    });
+    utilMonths.push({ year, month: m, charged, paid });
   }
   utilMonths.sort((a, b) => b.month - a.month);
 
@@ -116,32 +88,14 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     months: utilMonths,
   };
 
-  // Последний «открытый» месяц коммуналки (для модалки по умолчанию).
-  let utilitiesPrevMonth = utilMonths[0] || null;
-  if (!utilitiesPrevMonth && utilDueThrough > 0) {
-    utilitiesPrevMonth = {
-      year,
-      month: utilDueThrough,
-      charged: 0,
-      paid: 0,
-    };
-  } else if (!utilitiesPrevMonth) {
-    const cutoff =
-      dayjs().date() >= CHARGE_DAY ? dayjs().subtract(1, 'month') : dayjs().subtract(2, 'month');
-    if (cutoff.year() !== year) {
-      utilitiesPrevMonth = {
-        year: cutoff.year(),
-        month: cutoff.month() + 1,
-        charged: 0,
-        paid: 0,
-      };
-    }
-  }
+  const utilitiesPrevMonth =
+    utilMonths[0] ||
+    (utilDueThrough > 0 ? { year, month: utilDueThrough, charged: 0, paid: 0 } : null);
 
   return { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth };
 }
 
-/** KPI, графики и аналитика для дашборда директора */
+/** KPI, графики и аналитика — одни и те же для директора, зама и заведующей */
 async function buildDirectorAnalytics(propertyId, organizationId) {
   const rooms = await db('rooms')
     .where({ property_id: propertyId })
@@ -153,7 +107,8 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
   const freeArea = totalArea - occupiedArea;
   const occupancy = totalArea > 0 ? Math.round((occupiedArea / totalArea) * 1000) / 10 : 0;
 
-  const year = dayjs().year();
+  const minsk = nowInMinsk();
+  const year = minsk.year;
   const rentPeriodMonth = maxDueRentMonth(year);
 
   const registerRows = await listRentRegister(propertyId, year);
@@ -164,45 +119,36 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
           0
         )
       : 0;
-
-  const registerContractIds = registerRows.map((row) => row.contractId).filter(Boolean);
-  let paid = 0;
-  if (rentPeriodMonth > 0 && registerContractIds.length) {
-    const paymentsMonth = await db('payments')
-      .where({
-        property_id: propertyId,
-        period_year: year,
-        period_month: rentPeriodMonth,
-        payment_type: 'rent',
-      })
-      .whereIn('contract_id', registerContractIds)
-      .sum('amount as total')
-      .first();
-    paid = Number(paymentsMonth?.total || 0);
-  }
+  const paid =
+    rentPeriodMonth > 0
+      ? registerRows.reduce(
+          (s, row) => s + Number(row.months?.[rentPeriodMonth]?.paid || 0),
+          0
+        )
+      : 0;
 
   const { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth } =
     await buildRentDebtAndUtilities(propertyId, year, registerRows);
 
-  const revenueByMonth = await db('rent_charges')
-    .where({ property_id: propertyId })
-    .where('period_year', year)
-    .whereNot('status', 'cancelled')
-    .select('period_month')
-    .sum('amount_with_vat as total')
-    .groupBy('period_month');
-
-  const paymentsByMonth = await db('payments')
-    .where({ property_id: propertyId, period_year: year })
-    .select('period_month')
-    .sum('amount as total')
-    .groupBy('period_month');
+  // Графики только по договорам реестра (не «осиротевшие» начисления)
+  const revenueByMonth = [];
+  const paymentsByMonth = [];
+  for (let m = 1; m <= 12; m++) {
+    let rent = 0;
+    let rentPaid = 0;
+    for (const row of registerRows) {
+      rent += Number(row.months?.[m]?.rent || 0);
+      rentPaid += Number(row.months?.[m]?.paid || 0);
+    }
+    if (rent) revenueByMonth.push({ period_month: m, total: roundMoney(rent) });
+    if (rentPaid) paymentsByMonth.push({ period_month: m, total: roundMoney(rentPaid) });
+  }
 
   const expensesByMonth = await db('expenses')
     .where({ property_id: propertyId, period_year: year })
-    .select('period_month')
+    .groupBy('period_month')
     .sum('amount as total')
-    .groupBy('period_month');
+    .select('period_month');
 
   const roomsByStatus = await db('rooms')
     .where({ property_id: propertyId })
@@ -217,9 +163,9 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     .where('end_date', '>=', dayjs().format('YYYY-MM-DD'))
     .limit(10);
 
-  const debtors = await db('tenants')
-    .where({ organization_id: organizationId, status: 'debtor' })
-    .limit(10);
+  const debtors = organizationId
+    ? await db('tenants').where({ organization_id: organizationId, status: 'debtor' }).limit(10)
+    : [];
 
   const freeRooms = await db('rooms as r')
     .join('buildings as b', 'b.id', 'r.building_id')
@@ -262,10 +208,10 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
       freeArea,
       freeRentableArea: freeArea,
       occupancy,
-      rentMonth: charged,
+      rentMonth: roundMoney(charged),
       debt,
       debtMonths,
-      paidMonth: paid,
+      paidMonth: roundMoney(paid),
       utilities,
       utilitiesPrevMonth,
     },
@@ -284,11 +230,12 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 
 async function getManagerDashboard(propertyId, organizationId) {
   const director = await buildDirectorAnalytics(propertyId, organizationId);
+  const today = dayjs().format('YYYY-MM-DD');
   const todayPayments = await db('payments as p')
     .leftJoin('tenants as t', 't.id', 'p.tenant_id')
     .leftJoin('contracts as c', 'c.id', 'p.contract_id')
     .where({ 'p.property_id': propertyId })
-    .where('p.payment_date', dayjs().format('YYYY-MM-DD'))
+    .where('p.payment_date', today)
     .select(
       'p.id',
       'p.amount',
@@ -355,11 +302,10 @@ async function getManagerDashboard(propertyId, organizationId) {
     .select('c.id', 'c.contract_number', 'c.end_date', 't.name as tenant_name')
     .limit(8);
 
-  const year = dayjs().year();
-  const month = dayjs().month() + 1;
+  const minsk = nowInMinsk();
   let monthReadiness = null;
   try {
-    monthReadiness = await getMonthReadiness(propertyId, year, month);
+    monthReadiness = await getMonthReadiness(propertyId, minsk.year, minsk.month);
   } catch {
     monthReadiness = null;
   }
@@ -376,7 +322,7 @@ async function getManagerDashboard(propertyId, organizationId) {
   };
 }
 
-/** Полный дашборд: аналитика + операционные блоки (как у заведующей) */
+/** Один и тот же дашборд для директора / зама / заведующей */
 async function getDirectorDashboard(propertyId, organizationId) {
   return getManagerDashboard(propertyId, organizationId);
 }

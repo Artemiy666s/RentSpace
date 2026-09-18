@@ -1,5 +1,6 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
+const { maxDueRentMonth } = require('../utils/billingPeriod');
 
 const MONTH_NAMES = [
   'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
@@ -200,10 +201,16 @@ async function listTenantsTable(query, orgId) {
 
 async function computeContractsDebt(propertyId, year, contractIds) {
   if (!contractIds.length) return {};
+  const dueThrough = maxDueRentMonth(year);
+  if (dueThrough <= 0) {
+    return Object.fromEntries(contractIds.map((id) => [id, 0]));
+  }
+
   const rentRows = await db('rent_charges')
     .where({ property_id: propertyId, period_year: year })
     .whereNot('status', 'cancelled')
     .whereIn('contract_id', contractIds)
+    .where('period_month', '<=', dueThrough)
     .groupBy('contract_id')
     .sum('amount_with_vat as total')
     .select('contract_id');
@@ -544,9 +551,15 @@ async function listRentRegister(propertyId, year, buildingId) {
   const rentByContractMonth = await db('rent_charges')
     .where({ property_id: propertyId, period_year: year })
     .whereNot('status', 'cancelled')
-    .select('contract_id', 'period_month')
+    .groupBy('contract_id', 'period_month')
     .sum('amount_with_vat as total')
-    .groupBy('contract_id', 'period_month');
+    .select('contract_id', 'period_month');
+
+  const rentPayByContractMonth = await db('payments')
+    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+    .groupBy('contract_id', 'period_month')
+    .sum('amount as total')
+    .select('contract_id', 'period_month');
 
   const utilByContractMonth = await db('utility_charges')
     .where({ property_id: propertyId, period_year: year })
@@ -564,6 +577,11 @@ async function listRentRegister(propertyId, year, buildingId) {
   for (const row of rentByContractMonth) {
     const key = `${row.contract_id}-${row.period_month}`;
     rentMap[key] = Number(row.total);
+  }
+  const rentPaidMap = {};
+  for (const row of rentPayByContractMonth) {
+    const key = `${row.contract_id}-${row.period_month}`;
+    rentPaidMap[key] = Number(row.total);
   }
   const utilMap = {};
   for (const row of utilByContractMonth) {
@@ -585,23 +603,28 @@ async function listRentRegister(propertyId, year, buildingId) {
     paymentsByContract.map((p) => [p.contract_id, Number(p.total)])
   );
 
+  const dueThrough = maxDueRentMonth(year);
+
   return links.map((row, idx) => {
     const months = {};
     let totalRent = 0;
     let totalUtil = 0;
+    let dueRent = 0;
     for (let m = 1; m <= 12; m++) {
       const rk = `${row.contract_id}-${m}`;
       months[m] = {
         rent: rentMap[rk] || 0,
+        paid: rentPaidMap[rk] || 0,
         utility: utilMap[rk] || 0,
         utilityPaid: utilPaidMap[rk] || 0,
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
+      if (m <= dueThrough) dueRent += months[m].rent;
     }
     const paid = paidMap[row.contract_id] || 0;
-    // Задолженность в реестре — только по аренде; коммуналка в отдельных колонках
-    const debt = Math.max(0, totalRent - paid);
+    // Задолженность = аренда только по уже начисленным месяцам − оплаты аренды за год.
+    const debt = Math.max(0, dueRent - paid);
     return {
       rowNum: idx + 1,
       contractId: row.contract_id,
