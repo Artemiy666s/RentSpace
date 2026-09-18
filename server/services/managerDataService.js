@@ -1,6 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { maxDueRentMonth } = require('../utils/billingPeriod');
+const { ensureDueRentCharges, lastDueRentYm } = require('./chargeService');
 
 const MONTH_NAMES = [
   'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
@@ -44,8 +45,19 @@ function applyRoomFilters(q, query) {
 }
 
 async function listRoomsTable(query, orgId) {
-  const year = Number(query.year) || dayjs().year();
-  const month = Number(query.month) || dayjs().month() + 1;
+  const due = lastDueRentYm();
+  const year = Number(query.year) || due.year;
+  const month = Number(query.month) || due.month;
+
+  // Подтянуть начисления за наступившие месяцы до чтения таблицы
+  if (query.propertyId && orgId) {
+    await ensureDueRentCharges({
+      organizationId: orgId,
+      propertyId: query.propertyId,
+      fromDate: `${year}-01-01`,
+      userId: null,
+    }).catch(() => {});
+  }
 
   let q = db('rooms as r')
     .join('properties as p', 'p.id', 'r.property_id')
@@ -265,13 +277,23 @@ function sortOverviewRows(rows, sort) {
 async function listTenantContractOverview(query, orgId) {
   const propertyId = query.propertyId ? Number(query.propertyId) : null;
   const tab = query.tab || 'all';
-  const year = Number(query.year) || dayjs().year();
+  const due = lastDueRentYm();
+  const year = Number(query.year) || due.year;
   const fromMonth = query.fromMonth ? Number(query.fromMonth) : null;
   const fromYear = query.fromYear ? Number(query.fromYear) : null;
   const toMonth = query.toMonth ? Number(query.toMonth) : null;
   const toYear = query.toYear ? Number(query.toYear) : null;
   const hasDateFilter =
     fromMonth && fromYear && fromMonth >= 1 && fromMonth <= 12 && toMonth && toYear && toMonth >= 1 && toMonth <= 12;
+
+  if (propertyId && orgId) {
+    await ensureDueRentCharges({
+      organizationId: orgId,
+      propertyId,
+      fromDate: `${year}-01-01`,
+      userId: null,
+    }).catch(() => {});
+  }
 
   let q = db('contracts as c')
     .join('tenants as t', 't.id', 'c.tenant_id')
@@ -449,8 +471,19 @@ async function listContractsTable(query, orgId) {
 }
 
 async function listChargesTable(query, orgId) {
-  const year = Number(query.year) || dayjs().year();
-  const month = Number(query.month) || dayjs().month() + 1;
+  const due = lastDueRentYm();
+  const year = Number(query.year) || due.year;
+  const month = Number(query.month) || due.month;
+
+  if (query.propertyId && orgId) {
+    await ensureDueRentCharges({
+      organizationId: orgId,
+      propertyId: query.propertyId,
+      fromDate: `${year}-01-01`,
+      userId: null,
+    }).catch(() => {});
+  }
+
   let q = db('rent_charges as rc')
     .join('tenants as t', 't.id', 'rc.tenant_id')
     .join('contracts as c', 'c.id', 'rc.contract_id')
@@ -517,6 +550,16 @@ async function listPaymentsTable(query, orgId) {
 
 async function listRentRegister(propertyId, year, buildingId) {
   const bid = buildingId ? Number(buildingId) : null;
+
+  const property = await db('properties').where({ id: propertyId }).first();
+  if (property?.organization_id) {
+    await ensureDueRentCharges({
+      organizationId: property.organization_id,
+      propertyId,
+      fromDate: `${year}-01-01`,
+      userId: null,
+    }).catch(() => {});
+  }
 
   const roomAgg = db('contract_rooms as cr')
     .join('rooms as r', 'r.id', 'cr.room_id')

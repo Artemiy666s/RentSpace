@@ -3,8 +3,8 @@ const { db } = require('../db');
 const { logAudit, logActivity } = require('../utils/audit');
 const { recordRoomStatusChange } = require('../utils/roomStatusHistory');
 const { normalizeLegalTypeForDb } = require('../utils/legalType');
-const { ensureDueRentCharges } = require('./chargeService');
-const { nowInMinsk } = require('../utils/billingPeriod');
+const { ensureDueRentCharges, lastDueRentYm } = require('./chargeService');
+const { maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
 
 async function getRoomDetails(roomId) {
   const room = await db('rooms').whereNull('deleted_at').where({ id: roomId }).first();
@@ -39,11 +39,21 @@ async function getRoomDetails(roomId) {
     .first()
     .catch(() => null);
 
-  const minsk = nowInMinsk();
-  const year = minsk.year;
-  const month = minsk.month;
+  // Аренда: последний наступивший месяц (после 15-го, Europe/Minsk)
+  const rentDue = lastDueRentYm();
+  const rentYear = rentDue.year;
+  const rentMonth = rentDue.month;
 
-  // Подтянуть начисления за уже наступившие месяцы (после 15-го), если их ещё нет
+  // Коммуналка: после 15-го следующего месяца
+  const minsk = nowInMinsk();
+  let utilYear = minsk.year;
+  let utilMonth = maxDueUtilityMonth(utilYear);
+  if (utilMonth <= 0) {
+    utilYear -= 1;
+    utilMonth = maxDueUtilityMonth(utilYear) || 12;
+  }
+
+  // Подтянуть начисления за уже наступившие месяцы, если их ещё нет
   if (activeLink) {
     await ensureDueRentCharges({
       organizationId: activeLink.organization_id,
@@ -54,11 +64,11 @@ async function getRoomDetails(roomId) {
   }
 
   const charges = await db('rent_charges')
-    .where({ room_id: roomId, period_year: year, period_month: month })
+    .where({ room_id: roomId, period_year: rentYear, period_month: rentMonth })
     .whereNot('status', 'cancelled');
 
   const utilityCharges = await db('utility_charges')
-    .where({ room_id: roomId, period_year: year, period_month: month })
+    .where({ room_id: roomId, period_year: utilYear, period_month: utilMonth })
     .sum('amount as total')
     .first()
     .catch(() => ({ total: 0 }));
@@ -67,13 +77,14 @@ async function getRoomDetails(roomId) {
   const utilities = Number(utilityCharges?.total || 0);
   const payments = activeLink
     ? await db('payments')
-        .where({ tenant_id: activeLink.tenant_id, period_year: year, period_month: month })
+        .where({ tenant_id: activeLink.tenant_id, period_year: rentYear, period_month: rentMonth })
         .sum('amount as total')
         .first()
     : { total: 0 };
 
   const paid = Number(payments?.total || 0);
-  const debt = Math.max(0, charged + utilities - paid);
+  // Задолженность по аренде за наступивший месяц (коммуналка отдельно в UI)
+  const debt = Math.max(0, charged - paid);
 
   const vatRate = activeLink ? Number(activeLink.vat_rate) : 20;
   const rateWithoutVat = activeLink
@@ -284,14 +295,30 @@ async function vacateRoom({
   const links = await db('contract_rooms as cr')
     .join('contracts as c', 'c.id', 'cr.contract_id')
     .where('cr.room_id', roomId)
-    .where('c.status', 'active');
+    .where('c.status', 'active')
+    .select('cr.id', 'cr.start_date', 'cr.comment', 'c.id as contract_id', 'c.comment as contract_comment');
+
+  // До закрытия договора — начислить все уже наступившие месяцы (иначе generate не возьмёт completed)
+  if (links.length && organizationId && propertyId) {
+    const fromDate =
+      links
+        .map((l) => l.start_date)
+        .filter(Boolean)
+        .sort()[0] || endDate;
+    await ensureDueRentCharges({
+      organizationId,
+      propertyId,
+      fromDate,
+      userId,
+    }).catch(() => {});
+  }
 
   for (const link of links) {
     await db('contract_rooms').where({ id: link.id }).update({ end_date: endDate });
     await db('contracts').where({ id: link.contract_id }).update({
       status: reason === 'debt' ? 'terminated' : 'completed',
       actual_end_date: endDate,
-      comment: comment || reason || link.comment,
+      comment: comment || reason || link.contract_comment || link.comment,
       updated_at: db.fn.now(),
     });
   }

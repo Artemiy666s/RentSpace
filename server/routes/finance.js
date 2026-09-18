@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { authenticate, requireRoles } = require('../middlewares/auth');
 const { requireOrgAccess } = require('../middlewares/orgAccess');
-const { generateRentCharges } = require('../services/chargeService');
+const { generateRentCharges, ensureDueRentCharges } = require('../services/chargeService');
 const {
   buildRentChargesWorkbook,
   buildPaymentsWorkbook,
@@ -19,6 +19,15 @@ router.use(authenticate, requireOrgAccess());
 router.get(
   '/rent-charges',
   asyncHandler(async (req, res) => {
+    if (req.query.propertyId && req.user.organizationId) {
+      const year = Number(req.query.year) || new Date().getFullYear();
+      await ensureDueRentCharges({
+        organizationId: req.user.organizationId,
+        propertyId: req.query.propertyId,
+        fromDate: `${year}-01-01`,
+        userId: req.user.id,
+      }).catch(() => {});
+    }
     let q = db('rent_charges as rc')
       .join('tenants as t', 't.id', 'rc.tenant_id')
       .select('rc.*', 't.name as tenant_name');

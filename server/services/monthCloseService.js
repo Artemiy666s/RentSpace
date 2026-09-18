@@ -1,9 +1,20 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
+const { ensureDueRentCharges } = require('./chargeService');
 
 async function checkMonth(propertyId, year, month) {
   const errors = [];
   const warnings = [];
+
+  const property = await db('properties').where({ id: propertyId }).first();
+  if (property?.organization_id) {
+    await ensureDueRentCharges({
+      organizationId: property.organization_id,
+      propertyId,
+      fromDate: `${year}-01-01`,
+      userId: null,
+    }).catch(() => {});
+  }
 
   const rooms = await db('rooms').where({ property_id: propertyId }).whereNull('deleted_at');
   for (const r of rooms) {
