@@ -1,18 +1,23 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
-const dbHost = process.env.DB_HOST || process.env.TIDB_HOST || 'localhost';
-const useSsl = process.env.DB_SSL === 'true';
 const isVercel = !!process.env.VERCEL;
+const useTidb = Boolean(process.env.TIDB_HOST);
+const useSsl = process.env.DB_SSL === 'true' || useTidb;
 
 const base = {
   client: 'mysql2',
   connection: {
-    host: dbHost,
-    port: parseInt(process.env.DB_PORT || process.env.TIDB_PORT || '3306', 10),
-    database: process.env.DB_NAME || process.env.TIDB_DATABASE || 'rent_space',
-    user: process.env.DB_USER || process.env.TIDB_USER || 'root',
-    password: process.env.DB_PASSWORD || process.env.TIDB_PASSWORD || '',
+    // Production on Vercel reaches TiDB Cloud (TIDB_*), not the legacy DB_HOST:3049 endpoint.
+    host: (useTidb ? process.env.TIDB_HOST : process.env.DB_HOST) || 'localhost',
+    port: parseInt(
+      (useTidb ? process.env.TIDB_PORT : process.env.DB_PORT) || (useTidb ? '4000' : '3306'),
+      10
+    ),
+    database:
+      (useTidb ? process.env.TIDB_DATABASE : process.env.DB_NAME) || 'rent_space',
+    user: (useTidb ? process.env.TIDB_USER : process.env.DB_USER) || 'root',
+    password: (useTidb ? process.env.TIDB_PASSWORD : process.env.DB_PASSWORD) || '',
     charset: 'utf8mb4',
     ...(useSsl ? { ssl: { rejectUnauthorized: true } } : {}),
   },

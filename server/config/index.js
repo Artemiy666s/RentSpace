@@ -14,14 +14,16 @@ module.exports = {
   appUrl: process.env.APP_URL || 'http://localhost:3000',
   port: parseInt(process.env.PORT || '3000', 10),
   db: {
-    // Prefer DB_*; fall back to TIDB_* only when DB_* host is missing
-    host: process.env.DB_HOST || process.env.TIDB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || process.env.TIDB_PORT || '3306', 10),
-    database: process.env.DB_NAME || process.env.TIDB_DATABASE || 'rent_space',
-    user: process.env.DB_USER || process.env.TIDB_USER || 'root',
-    password: process.env.DB_PASSWORD || process.env.TIDB_PASSWORD || '',
-    // Do not force SSL just because TIDB_* vars exist alongside DB_*
-    ssl: process.env.DB_SSL === 'true',
+    // Prefer TIDB_* on Vercel/TiDB Cloud; legacy DB_* stays for local MySQL.
+    host: process.env.TIDB_HOST || process.env.DB_HOST || 'localhost',
+    port: parseInt(
+      process.env.TIDB_PORT || process.env.DB_PORT || (process.env.TIDB_HOST ? '4000' : '3306'),
+      10
+    ),
+    database: process.env.TIDB_DATABASE || process.env.DB_NAME || 'rent_space',
+    user: process.env.TIDB_USER || process.env.DB_USER || 'root',
+    password: process.env.TIDB_PASSWORD || process.env.DB_PASSWORD || '',
+    ssl: process.env.DB_SSL === 'true' || Boolean(process.env.TIDB_HOST),
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'dev_secret_change_me',
