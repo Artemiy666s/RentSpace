@@ -40,8 +40,8 @@ function maxDueUtilityMonth(year, asOf = dayjs()) {
  * Договоры как в реестре, но только месяцы, по которым аренда уже начислена
  * (после 15-го числа периода). Будущие месяцы в KPI не входят.
  */
-async function buildRentDebtAndUtilities(propertyId, year) {
-  const registerRows = await listRentRegister(propertyId, year);
+async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
+  const registerRows = registerRowsPreloaded || (await listRentRegister(propertyId, year));
   const dueThrough = maxDueRentMonth(year);
 
   const monthTotals = {};
@@ -179,24 +179,35 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
   const occupancy = totalArea > 0 ? Math.round((occupiedArea / totalArea) * 1000) / 10 : 0;
 
   const year = dayjs().year();
-  const month = dayjs().month() + 1;
+  const rentPeriodMonth = maxDueRentMonth(year);
 
-  const rentMonth = await db('rent_charges')
-    .where({ property_id: propertyId, period_year: year, period_month: month })
-    .whereNot('status', 'cancelled')
-    .sum('amount_with_vat as total')
-    .first();
+  const registerRows = await listRentRegister(propertyId, year);
+  const charged =
+    rentPeriodMonth > 0
+      ? registerRows.reduce(
+          (s, row) => s + Number(row.months?.[rentPeriodMonth]?.rent || 0),
+          0
+        )
+      : 0;
 
-  const paymentsMonth = await db('payments')
-    .where({ property_id: propertyId, period_year: year, period_month: month, payment_type: 'rent' })
-    .sum('amount as total')
-    .first();
-
-  const charged = Number(rentMonth?.total || 0);
-  const paid = Number(paymentsMonth?.total || 0);
+  const registerContractIds = registerRows.map((row) => row.contractId).filter(Boolean);
+  let paid = 0;
+  if (rentPeriodMonth > 0 && registerContractIds.length) {
+    const paymentsMonth = await db('payments')
+      .where({
+        property_id: propertyId,
+        period_year: year,
+        period_month: rentPeriodMonth,
+        payment_type: 'rent',
+      })
+      .whereIn('contract_id', registerContractIds)
+      .sum('amount as total')
+      .first();
+    paid = Number(paymentsMonth?.total || 0);
+  }
 
   const { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth } =
-    await buildRentDebtAndUtilities(propertyId, year);
+    await buildRentDebtAndUtilities(propertyId, year, registerRows);
 
   const revenueByMonth = await db('rent_charges')
     .where({ property_id: propertyId })
