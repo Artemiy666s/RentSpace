@@ -529,14 +529,18 @@ async function listPaymentsTable(query, orgId) {
 
 async function listRentRegister(propertyId, year, buildingId) {
   const bid = buildingId ? Number(buildingId) : null;
-  const cacheKey = `rent-register:${propertyId}:${year}:${bid || 'all'}`;
+  const cacheKey = `rent-register:v2:${propertyId}:${year}:${bid || 'all'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid));
 }
 
 function invalidateRentRegisterCache(propertyId) {
-  if (propertyId) cacheDelPrefix(`rent-register:${propertyId}:`);
-  else cacheDelPrefix('rent-register:');
+  if (propertyId) {
+    cacheDelPrefix(`rent-register:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v2:${propertyId}:`);
+  } else {
+    cacheDelPrefix('rent-register:');
+  }
 }
 
 async function loadRentRegister(propertyId, year, bid) {
