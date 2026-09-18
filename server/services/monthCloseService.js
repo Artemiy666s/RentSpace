@@ -1,6 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { ensureDueRentCharges } = require('./chargeService');
+const { roomRentableArea, isOccupiedForArea } = require('../utils/rentableArea');
 
 async function checkMonth(propertyId, year, month) {
   const errors = [];
@@ -105,12 +106,15 @@ async function checkMonth(propertyId, year, month) {
   const freeStatuses = ['free', 'ready_for_rent', 'repair', 'not_available'];
   const freeArea = rooms
     .filter((r) => freeStatuses.includes(r.status))
-    .reduce((s, r) => s + Number(r.area), 0);
-  const totalArea = rooms.reduce((s, r) => s + Number(r.area), 0);
+    .reduce((s, r) => s + roomRentableArea(r), 0);
+  const totalArea = rooms.reduce((s, r) => s + roomRentableArea(r), 0);
   const occupiedArea = rooms
-    .filter((r) => ['occupied', 'debt'].includes(r.status))
-    .reduce((s, r) => s + Number(r.area), 0);
-  if (Math.abs(totalArea - freeArea - occupiedArea) > 0.5) {
+    .filter((r) => isOccupiedForArea(r.status))
+    .reduce((s, r) => s + roomRentableArea(r), 0);
+  const inProgressArea = rooms
+    .filter((r) => ['negotiation', 'reserved'].includes(r.status))
+    .reduce((s, r) => s + roomRentableArea(r), 0);
+  if (Math.abs(totalArea - freeArea - occupiedArea - inProgressArea) > 0.5) {
     warnings.push({
       code: 'area_mismatch',
       message: 'Свободная площадь не сходится с общей (проверьте статусы помещений)',

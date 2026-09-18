@@ -3,6 +3,7 @@ const { db } = require('../db');
 const { getMonthReadiness } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
 const { maxDueRentMonth, maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
+const { roomRentableArea, isOccupiedForArea, sumRentableArea } = require('../utils/rentableArea');
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -101,10 +102,11 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     .where({ property_id: propertyId })
     .whereNull('deleted_at');
 
-  const totalArea = rooms.reduce((s, r) => s + Number(r.area), 0);
-  const occupied = rooms.filter((r) => r.status === 'occupied' || r.status === 'debt');
-  const occupiedArea = occupied.reduce((s, r) => s + Number(r.area), 0);
-  const freeArea = totalArea - occupiedArea;
+  // «Общая торговая» / свободная — только сдаваемая площадь (без технических, коридоров и т.п.)
+  const totalArea = sumRentableArea(rooms);
+  const occupiedArea = sumRentableArea(rooms, (r) => isOccupiedForArea(r.status));
+  const freeArea = Math.max(0, totalArea - occupiedArea);
+  const freeRentableArea = freeArea;
   const occupancy = totalArea > 0 ? Math.round((occupiedArea / totalArea) * 1000) / 10 : 0;
 
   const minsk = nowInMinsk();
@@ -187,26 +189,54 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     .orderBy('r.room_number', 'asc')
     .limit(10);
 
-  const occupancyByFloor = await db('rooms as r')
+  const occupancyByFloorRows = await db('rooms as r')
     .join('floors as f', 'f.id', 'r.floor_id')
     .where('r.property_id', propertyId)
     .whereNull('r.deleted_at')
-    .groupBy('f.id', 'f.name', 'f.level_number')
     .select(
+      'f.id as floor_id',
       'f.name',
       'f.level_number',
-      db.raw('COUNT(r.id) as total'),
-      db.raw("SUM(CASE WHEN r.status IN ('occupied','debt') THEN 1 ELSE 0 END) as occupied_count"),
-      db.raw('SUM(r.area) as total_area'),
-      db.raw("SUM(CASE WHEN r.status IN ('occupied','debt') THEN r.area ELSE 0 END) as occupied_area")
+      'r.area',
+      'r.rentable_area',
+      'r.status',
+      'r.room_type'
     );
+
+  const floorMap = new Map();
+  for (const row of occupancyByFloorRows) {
+    const key = row.floor_id;
+    if (!floorMap.has(key)) {
+      floorMap.set(key, {
+        name: row.name,
+        level_number: row.level_number,
+        total: 0,
+        occupied_count: 0,
+        total_area: 0,
+        occupied_area: 0,
+      });
+    }
+    const bucket = floorMap.get(key);
+    const sqm = roomRentableArea(row);
+    if (sqm <= 0 && !isOccupiedForArea(row.status)) {
+      // техническое / не сдаётся — не в торговую площадь и не в счётчик сдаваемых
+      continue;
+    }
+    bucket.total += 1;
+    bucket.total_area += sqm;
+    if (isOccupiedForArea(row.status)) {
+      bucket.occupied_count += 1;
+      bucket.occupied_area += sqm;
+    }
+  }
+  const occupancyByFloor = Array.from(floorMap.values());
 
   return {
     kpis: {
       totalArea,
       occupiedArea,
       freeArea,
-      freeRentableArea: freeArea,
+      freeRentableArea,
       occupancy,
       rentMonth: roundMoney(charged),
       debt,
