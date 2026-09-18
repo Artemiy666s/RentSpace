@@ -3,8 +3,8 @@ const { db } = require('../db');
 const { getMonthReadiness } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
 
-/** Аренда считается начисленной после этого числа месяца (включительно). */
-const RENT_CHARGE_DAY = 15;
+/** Аренда / коммуналка: порог числа месяца (включительно). */
+const CHARGE_DAY = 15;
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -12,14 +12,27 @@ function roundMoney(value) {
 
 /**
  * До какого месяца года аренда уже «наступила» для задолженности.
- * До 15-го текущего месяца текущий месяц ещё не в долге.
+ * Аренда за месяц M — после 15-го числа месяца M.
  */
 function maxDueRentMonth(year, asOf = dayjs()) {
   const y = Number(year);
   if (asOf.year() > y) return 12;
   if (asOf.year() < y) return 0;
-  if (asOf.date() >= RENT_CHARGE_DAY) return asOf.month() + 1;
+  if (asOf.date() >= CHARGE_DAY) return asOf.month() + 1;
   return asOf.month(); // 0 в январе до 15-го → долга по этому году ещё нет
+}
+
+/**
+ * До какого месяца года коммуналка уже показывается.
+ * Коммуналка за месяц M — только после 15-го числа месяца M+1
+ * (сент. → после 15 окт.; на 18 сент. видны август и раньше).
+ */
+function maxDueUtilityMonth(year, asOf = dayjs()) {
+  const cutoff =
+    asOf.date() >= CHARGE_DAY ? asOf.subtract(1, 'month') : asOf.subtract(2, 'month');
+  if (cutoff.year() > Number(year)) return 12;
+  if (cutoff.year() < Number(year)) return 0;
+  return cutoff.month() + 1;
 }
 
 /**
@@ -90,8 +103,9 @@ async function buildRentDebtAndUtilities(propertyId, year) {
 
   const utilChargedMap = Object.fromEntries(utilRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
   const utilPaidMap = Object.fromEntries(utilPayRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
+  const utilDueThrough = maxDueUtilityMonth(year);
   const utilMonths = [];
-  for (let m = 1; m <= 12; m++) {
+  for (let m = 1; m <= utilDueThrough; m++) {
     const charged = utilChargedMap[m] || 0;
     const paid = utilPaidMap[m] || 0;
     if (!charged && !paid) continue;
@@ -110,37 +124,43 @@ async function buildRentDebtAndUtilities(propertyId, year) {
     months: utilMonths,
   };
 
-  const prev = dayjs().subtract(1, 'month');
-  const prevYear = prev.year();
-  const prevMonth = prev.month() + 1;
-  let utilitiesPrevMonth = null;
-  if (prevYear === year) {
-    utilitiesPrevMonth = utilMonths.find((row) => row.month === prevMonth) || {
-      year: prevYear,
-      month: prevMonth,
+  // Последний «открытый» месяц коммуналки (для модалки по умолчанию).
+  let utilitiesPrevMonth = utilMonths[0] || null;
+  if (!utilitiesPrevMonth && utilDueThrough > 0) {
+    utilitiesPrevMonth = {
+      year,
+      month: utilDueThrough,
       charged: 0,
       paid: 0,
     };
-  } else {
-    const prevCharged = await db('utility_charges')
-      .where({ property_id: propertyId, period_year: prevYear, period_month: prevMonth })
-      .sum('amount as total')
-      .first();
-    const prevPaid = await db('payments')
-      .where({
-        property_id: propertyId,
-        period_year: prevYear,
-        period_month: prevMonth,
-        payment_type: 'utilities',
-      })
-      .sum('amount as total')
-      .first();
-    utilitiesPrevMonth = {
-      year: prevYear,
-      month: prevMonth,
-      charged: roundMoney(prevCharged?.total),
-      paid: roundMoney(prevPaid?.total),
-    };
+  } else if (!utilitiesPrevMonth) {
+    const cutoff =
+      dayjs().date() >= CHARGE_DAY ? dayjs().subtract(1, 'month') : dayjs().subtract(2, 'month');
+    if (cutoff.year() !== year) {
+      const prevCharged = await db('utility_charges')
+        .where({
+          property_id: propertyId,
+          period_year: cutoff.year(),
+          period_month: cutoff.month() + 1,
+        })
+        .sum('amount as total')
+        .first();
+      const prevPaid = await db('payments')
+        .where({
+          property_id: propertyId,
+          period_year: cutoff.year(),
+          period_month: cutoff.month() + 1,
+          payment_type: 'utilities',
+        })
+        .sum('amount as total')
+        .first();
+      utilitiesPrevMonth = {
+        year: cutoff.year(),
+        month: cutoff.month() + 1,
+        charged: roundMoney(prevCharged?.total),
+        paid: roundMoney(prevPaid?.total),
+      };
+    }
   }
 
   return { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth };
