@@ -1,7 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { maxDueRentMonth } = require('../utils/billingPeriod');
-const { ensureDueRentCharges, lastDueRentYm } = require('./chargeService');
+const { lastDueRentYm } = require('./chargeService');
 
 const MONTH_NAMES = [
   'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
@@ -48,16 +48,6 @@ async function listRoomsTable(query, orgId) {
   const due = lastDueRentYm();
   const year = Number(query.year) || due.year;
   const month = Number(query.month) || due.month;
-
-  // Подтянуть начисления за наступившие месяцы до чтения таблицы
-  if (query.propertyId && orgId) {
-    await ensureDueRentCharges({
-      organizationId: orgId,
-      propertyId: query.propertyId,
-      userId: null,
-      onlyLastDue: true,
-    }).catch(() => {});
-  }
 
   let q = db('rooms as r')
     .join('properties as p', 'p.id', 'r.property_id')
@@ -286,15 +276,6 @@ async function listTenantContractOverview(query, orgId) {
   const hasDateFilter =
     fromMonth && fromYear && fromMonth >= 1 && fromMonth <= 12 && toMonth && toYear && toMonth >= 1 && toMonth <= 12;
 
-  if (propertyId && orgId) {
-    await ensureDueRentCharges({
-      organizationId: orgId,
-      propertyId,
-      userId: null,
-      onlyLastDue: true,
-    }).catch(() => {});
-  }
-
   let q = db('contracts as c')
     .join('tenants as t', 't.id', 'c.tenant_id')
     .whereNull('t.deleted_at')
@@ -475,15 +456,6 @@ async function listChargesTable(query, orgId) {
   const year = Number(query.year) || due.year;
   const month = Number(query.month) || due.month;
 
-  if (query.propertyId && orgId) {
-    await ensureDueRentCharges({
-      organizationId: orgId,
-      propertyId: query.propertyId,
-      userId: null,
-      onlyLastDue: true,
-    }).catch(() => {});
-  }
-
   let q = db('rent_charges as rc')
     .join('tenants as t', 't.id', 'rc.tenant_id')
     .join('contracts as c', 'c.id', 'rc.contract_id')
@@ -550,16 +522,6 @@ async function listPaymentsTable(query, orgId) {
 
 async function listRentRegister(propertyId, year, buildingId) {
   const bid = buildingId ? Number(buildingId) : null;
-
-  const property = await db('properties').where({ id: propertyId }).first();
-  if (property?.organization_id) {
-    await ensureDueRentCharges({
-      organizationId: property.organization_id,
-      propertyId,
-      userId: null,
-      onlyLastDue: true,
-    }).catch(() => {});
-  }
 
   const roomAgg = db('contract_rooms as cr')
     .join('rooms as r', 'r.id', 'cr.room_id')

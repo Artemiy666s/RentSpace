@@ -1,6 +1,6 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
-const { getMonthReadiness } = require('./monthCloseService');
+const { getMonthReadinessLite } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
 const { maxDueRentMonth, maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
 const { roomRentableArea, isOccupiedForArea, sumRentableArea } = require('../utils/rentableArea');
@@ -259,37 +259,44 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 }
 
 async function getManagerDashboard(propertyId, organizationId) {
-  const director = await buildDirectorAnalytics(propertyId, organizationId);
   const today = dayjs().format('YYYY-MM-DD');
-  const todayPayments = await db('payments as p')
-    .leftJoin('tenants as t', 't.id', 'p.tenant_id')
-    .leftJoin('contracts as c', 'c.id', 'p.contract_id')
-    .where({ 'p.property_id': propertyId })
-    .where('p.payment_date', today)
-    .select(
-      'p.id',
-      'p.amount',
-      'p.payment_type',
-      'p.payment_date',
-      't.name as tenant_name',
-      'c.contract_number'
-    )
-    .orderBy('p.amount', 'desc');
+  const minsk = nowInMinsk();
 
-  const requests = await db('service_requests')
-    .where({ property_id: propertyId })
-    .whereNot('status', 'closed')
-    .orderBy('created_at', 'desc')
-    .limit(5);
-
-  const activity = await db('activity_events')
-    .where({ property_id: propertyId })
-    .orderBy('created_at', 'desc')
-    .limit(15);
-
-  let negotiations = [];
-  try {
-    negotiations = await db('room_negotiations as n')
+  const [
+    director,
+    todayPayments,
+    requests,
+    activity,
+    negotiations,
+    debtRooms,
+    expiringSoon,
+    monthReadiness,
+  ] = await Promise.all([
+    buildDirectorAnalytics(propertyId, organizationId),
+    db('payments as p')
+      .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+      .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+      .where({ 'p.property_id': propertyId })
+      .where('p.payment_date', today)
+      .select(
+        'p.id',
+        'p.amount',
+        'p.payment_type',
+        'p.payment_date',
+        't.name as tenant_name',
+        'c.contract_number'
+      )
+      .orderBy('p.amount', 'desc'),
+    db('service_requests')
+      .where({ property_id: propertyId })
+      .whereNot('status', 'closed')
+      .orderBy('created_at', 'desc')
+      .limit(5),
+    db('activity_events')
+      .where({ property_id: propertyId })
+      .orderBy('created_at', 'desc')
+      .limit(15),
+    db('room_negotiations as n')
       .join('rooms as r', 'r.id', 'n.room_id')
       .join('buildings as b', 'b.id', 'r.building_id')
       .join('floors as f', 'f.id', 'r.floor_id')
@@ -304,41 +311,31 @@ async function getManagerDashboard(propertyId, organizationId) {
         'f.level_number'
       )
       .orderBy('n.next_contact_date', 'asc')
-      .limit(8);
-  } catch {
-    negotiations = [];
-  }
-
-  const debtRooms = await db('rooms as r')
-    .join('buildings as b', 'b.id', 'r.building_id')
-    .join('floors as f', 'f.id', 'r.floor_id')
-    .where({ 'r.property_id': propertyId, 'r.status': 'debt' })
-    .whereNull('r.deleted_at')
-    .select(
-      'r.id',
-      'r.room_number',
-      'r.room_type',
-      'b.name as building_name',
-      'f.name as floor_name',
-      'f.level_number'
-    )
-    .limit(8);
-
-  const expiringSoon = await db('contracts as c')
-    .join('tenants as t', 't.id', 'c.tenant_id')
-    .where({ 'c.property_id': propertyId, 'c.status': 'active' })
-    .where('c.end_date', '<=', dayjs().add(30, 'day').format('YYYY-MM-DD'))
-    .where('c.end_date', '>=', dayjs().format('YYYY-MM-DD'))
-    .select('c.id', 'c.contract_number', 'c.end_date', 't.name as tenant_name')
-    .limit(8);
-
-  const minsk = nowInMinsk();
-  let monthReadiness = null;
-  try {
-    monthReadiness = await getMonthReadiness(propertyId, minsk.year, minsk.month);
-  } catch {
-    monthReadiness = null;
-  }
+      .limit(8)
+      .catch(() => []),
+    db('rooms as r')
+      .join('buildings as b', 'b.id', 'r.building_id')
+      .join('floors as f', 'f.id', 'r.floor_id')
+      .where({ 'r.property_id': propertyId, 'r.status': 'debt' })
+      .whereNull('r.deleted_at')
+      .select(
+        'r.id',
+        'r.room_number',
+        'r.room_type',
+        'b.name as building_name',
+        'f.name as floor_name',
+        'f.level_number'
+      )
+      .limit(8),
+    db('contracts as c')
+      .join('tenants as t', 't.id', 'c.tenant_id')
+      .where({ 'c.property_id': propertyId, 'c.status': 'active' })
+      .where('c.end_date', '<=', dayjs().add(30, 'day').format('YYYY-MM-DD'))
+      .where('c.end_date', '>=', dayjs().format('YYYY-MM-DD'))
+      .select('c.id', 'c.contract_number', 'c.end_date', 't.name as tenant_name')
+      .limit(8),
+    getMonthReadinessLite(propertyId, minsk.year, minsk.month).catch(() => null),
+  ]);
 
   return {
     ...director,

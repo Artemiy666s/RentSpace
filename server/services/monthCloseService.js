@@ -1,23 +1,31 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
-const { ensureDueRentCharges } = require('./chargeService');
 const { roomRentableArea, isOccupiedForArea } = require('../utils/rentableArea');
 
 async function checkMonth(propertyId, year, month) {
   const errors = [];
   const warnings = [];
 
-  const property = await db('properties').where({ id: propertyId }).first();
-  if (property?.organization_id) {
-    await ensureDueRentCharges({
-      organizationId: property.organization_id,
-      propertyId,
-      userId: null,
-      onlyLastDue: true,
-    }).catch(() => {});
+  const rooms = await db('rooms').where({ property_id: propertyId }).whereNull('deleted_at');
+
+  const occupiedIds = rooms.filter((r) => ['occupied', 'debt'].includes(r.status)).map((r) => r.id);
+  const linksByRoom = new Map();
+  if (occupiedIds.length) {
+    const links = await db('contract_rooms as cr')
+      .join('contracts as c', 'c.id', 'cr.contract_id')
+      .whereIn('cr.room_id', occupiedIds)
+      .where('c.status', 'active')
+      .select(
+        'cr.room_id',
+        'cr.rate_without_vat',
+        'cr.start_date',
+        'c.id as contract_id'
+      );
+    for (const link of links) {
+      if (!linksByRoom.has(link.room_id)) linksByRoom.set(link.room_id, link);
+    }
   }
 
-  const rooms = await db('rooms').where({ property_id: propertyId }).whereNull('deleted_at');
   for (const r of rooms) {
     if (!r.area || Number(r.area) <= 0) {
       errors.push({ code: 'room_area', message: `Помещение ${r.room_number}: не указана площадь`, roomId: r.id });
@@ -26,11 +34,7 @@ async function checkMonth(propertyId, year, month) {
       errors.push({ code: 'room_status', message: `Помещение ${r.room_number}: нет статуса`, roomId: r.id });
     }
     if (['occupied', 'debt'].includes(r.status)) {
-      const link = await db('contract_rooms as cr')
-        .join('contracts as c', 'c.id', 'cr.contract_id')
-        .where('cr.room_id', r.id)
-        .where('c.status', 'active')
-        .first();
+      const link = linksByRoom.get(r.id);
       if (!link) {
         errors.push({
           code: 'occupied_no_contract',
@@ -44,7 +48,7 @@ async function checkMonth(propertyId, year, month) {
           roomId: r.id,
         });
       }
-      if (!link?.start_date && link) {
+      if (link && !link.start_date) {
         errors.push({
           code: 'no_start_date',
           message: `Договор по помещению ${r.room_number}: нет даты начала`,
@@ -152,6 +156,55 @@ async function getMonthReadiness(propertyId, year, month) {
   };
 }
 
+/** Лёгкая проверка для дашборда — без обхода всех помещений. */
+async function getMonthReadinessLite(propertyId, year, month) {
+  const [charges, utilities, payments, expenses, closing] = await Promise.all([
+    db('rent_charges')
+      .where({ property_id: propertyId, period_year: year, period_month: month })
+      .whereNot('status', 'cancelled')
+      .count('id as c')
+      .first(),
+    db('utility_charges')
+      .where({ property_id: propertyId, period_year: year, period_month: month })
+      .count('id as c')
+      .first(),
+    db('payments')
+      .where({ property_id: propertyId, period_year: year, period_month: month })
+      .count('id as c')
+      .first(),
+    db('expenses')
+      .where({ property_id: propertyId, period_year: year, period_month: month })
+      .count('id as c')
+      .first(),
+    db('month_closings')
+      .where({ property_id: propertyId, period_year: year, period_month: month })
+      .first(),
+  ]);
+
+  const chargesCount = Number(charges?.c || 0);
+  const utilitiesCount = Number(utilities?.c || 0);
+  const paymentsCount = Number(payments?.c || 0);
+  const expensesCount = Number(expenses?.c || 0);
+
+  return {
+    roomsChecked: true,
+    roomsTotal: 0,
+    chargesGenerated: chargesCount > 0,
+    chargesCount,
+    utilitiesEntered: utilitiesCount > 0,
+    utilitiesCount,
+    paymentsEntered: paymentsCount > 0,
+    paymentsCount,
+    expensesEntered: expensesCount > 0,
+    expensesCount,
+    errorsCount: 0,
+    warningsCount: 0,
+    hasErrors: false,
+    monthClosed: closing?.status === 'closed',
+    closingStatus: closing?.status || null,
+  };
+}
+
 async function closeMonth({ propertyId, organizationId, year, month, userId }) {
   const check = await checkMonth(propertyId, year, month);
   if (!check.ok) {
@@ -186,4 +239,4 @@ async function closeMonth({ propertyId, organizationId, year, month, userId }) {
   return id;
 }
 
-module.exports = { checkMonth, closeMonth, getMonthReadiness };
+module.exports = { checkMonth, closeMonth, getMonthReadiness, getMonthReadinessLite };

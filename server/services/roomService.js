@@ -53,16 +53,6 @@ async function getRoomDetails(roomId) {
     utilMonth = maxDueUtilityMonth(utilYear) || 12;
   }
 
-  // Подтянуть только текущий наступивший месяц (быстро, без обхода всего года)
-  if (activeLink) {
-    await ensureDueRentCharges({
-      organizationId: activeLink.organization_id,
-      propertyId: activeLink.property_id || room.property_id,
-      userId: null,
-      onlyLastDue: true,
-    }).catch(() => {});
-  }
-
   const charges = await db('rent_charges')
     .where({ room_id: roomId, period_year: rentYear, period_month: rentMonth })
     .whereNot('status', 'cancelled');
