@@ -54,8 +54,8 @@ async function listRoomsTable(query, orgId) {
     await ensureDueRentCharges({
       organizationId: orgId,
       propertyId: query.propertyId,
-      fromDate: `${year}-01-01`,
       userId: null,
+      onlyLastDue: true,
     }).catch(() => {});
   }
 
@@ -290,8 +290,8 @@ async function listTenantContractOverview(query, orgId) {
     await ensureDueRentCharges({
       organizationId: orgId,
       propertyId,
-      fromDate: `${year}-01-01`,
       userId: null,
+      onlyLastDue: true,
     }).catch(() => {});
   }
 
@@ -479,8 +479,8 @@ async function listChargesTable(query, orgId) {
     await ensureDueRentCharges({
       organizationId: orgId,
       propertyId: query.propertyId,
-      fromDate: `${year}-01-01`,
       userId: null,
+      onlyLastDue: true,
     }).catch(() => {});
   }
 
@@ -556,8 +556,8 @@ async function listRentRegister(propertyId, year, buildingId) {
     await ensureDueRentCharges({
       organizationId: property.organization_id,
       propertyId,
-      fromDate: `${year}-01-01`,
       userId: null,
+      onlyLastDue: true,
     }).catch(() => {});
   }
 

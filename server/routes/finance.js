@@ -20,12 +20,11 @@ router.get(
   '/rent-charges',
   asyncHandler(async (req, res) => {
     if (req.query.propertyId && req.user.organizationId) {
-      const year = Number(req.query.year) || new Date().getFullYear();
       await ensureDueRentCharges({
         organizationId: req.user.organizationId,
         propertyId: req.query.propertyId,
-        fromDate: `${year}-01-01`,
         userId: req.user.id,
+        onlyLastDue: true,
       }).catch(() => {});
     }
     let q = db('rent_charges as rc')

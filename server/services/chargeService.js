@@ -16,11 +16,28 @@ function lastDueRentYm(asOf = new Date()) {
 }
 
 /**
- * Создаёт отсутствующие начисления аренды по объекту за все месяцы
- * от fromDate (или начала текущего года) до последнего «наступившего» месяца.
+ * Создаёт отсутствующие начисления аренды.
+ * @param {boolean} [onlyLastDue] — только последний наступивший месяц (быстро, для чтения дашборда/реестра)
  */
-async function ensureDueRentCharges({ organizationId, propertyId, fromDate, userId, asOf = new Date() }) {
+async function ensureDueRentCharges({
+  organizationId,
+  propertyId,
+  fromDate,
+  userId,
+  asOf = new Date(),
+  onlyLastDue = false,
+}) {
   const due = lastDueRentYm(asOf);
+  if (onlyLastDue) {
+    return generateRentCharges({
+      organizationId,
+      propertyId,
+      year: due.year,
+      month: due.month,
+      userId,
+    });
+  }
+
   const start = dayjs(fromDate || `${due.year}-01-01`).startOf('month');
   let y = start.year();
   let m = start.month() + 1;
@@ -67,16 +84,25 @@ async function generateRentCharges({ organizationId, propertyId, year, month, us
       'r.id as room_id'
     );
 
-  const created = [];
-  for (const row of activeRooms) {
-    const existing = await db('rent_charges').where({
-      contract_id: row.contract_id,
-      room_id: row.room_id,
+  if (!activeRooms.length) return [];
+
+  const existingRows = await db('rent_charges')
+    .where({
+      property_id: propertyId,
       period_year: year,
       period_month: month,
-    }).whereNot('status', 'cancelled').first();
+    })
+    .whereNot('status', 'cancelled')
+    .select('contract_id', 'room_id');
 
-    if (existing) continue;
+  const existingKeys = new Set(
+    existingRows.map((row) => `${row.contract_id}:${row.room_id}`)
+  );
+
+  const toInsert = [];
+  for (const row of activeRooms) {
+    const key = `${row.contract_id}:${row.room_id}`;
+    if (existingKeys.has(key)) continue;
 
     const amounts = calcRentAmount({
       area: row.area,
@@ -88,7 +114,7 @@ async function generateRentCharges({ organizationId, propertyId, year, month, us
       endDate: row.end_date || row.contract_end,
     });
 
-    const [id] = await db('rent_charges').insert({
+    toInsert.push({
       organization_id: organizationId,
       property_id: propertyId,
       tenant_id: row.tenant_id,
@@ -103,11 +129,21 @@ async function generateRentCharges({ organizationId, propertyId, year, month, us
       vat_amount: amounts.vatAmount,
       amount_with_vat: amounts.amountWithVat,
       status: 'charged',
-      created_by: userId,
+      created_by: userId || null,
     });
-    created.push(id);
   }
-  return created;
+
+  if (!toInsert.length) return [];
+
+  // Пакетная вставка — без N+1 на каждый договор
+  const ids = await db('rent_charges').insert(toInsert);
+  if (Array.isArray(ids)) return ids;
+  // mysql2 часто возвращает первый insertId
+  const firstId = Number(ids);
+  if (Number.isFinite(firstId) && toInsert.length > 1) {
+    return Array.from({ length: toInsert.length }, (_, i) => firstId + i);
+  }
+  return firstId ? [firstId] : [];
 }
 
 module.exports = { generateRentCharges, ensureDueRentCharges, lastDueRentYm };

@@ -12,8 +12,8 @@ async function checkMonth(propertyId, year, month) {
     await ensureDueRentCharges({
       organizationId: property.organization_id,
       propertyId,
-      fromDate: `${year}-01-01`,
       userId: null,
+      onlyLastDue: true,
     }).catch(() => {});
   }
 

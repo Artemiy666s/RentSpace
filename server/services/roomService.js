@@ -53,13 +53,13 @@ async function getRoomDetails(roomId) {
     utilMonth = maxDueUtilityMonth(utilYear) || 12;
   }
 
-  // Подтянуть начисления за уже наступившие месяцы, если их ещё нет
+  // Подтянуть только текущий наступивший месяц (быстро, без обхода всего года)
   if (activeLink) {
     await ensureDueRentCharges({
       organizationId: activeLink.organization_id,
       propertyId: activeLink.property_id || room.property_id,
-      fromDate: activeLink.start_date,
       userId: null,
+      onlyLastDue: true,
     }).catch(() => {});
   }
 
