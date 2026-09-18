@@ -3,30 +3,44 @@ const { db } = require('../db');
 const { getMonthReadiness } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
 
+/** Аренда считается начисленной после этого числа месяца (включительно). */
+const RENT_CHARGE_DAY = 15;
+
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
 /**
+ * До какого месяца года аренда уже «наступила» для задолженности.
+ * До 15-го текущего месяца текущий месяц ещё не в долге.
+ */
+function maxDueRentMonth(year, asOf = dayjs()) {
+  const y = Number(year);
+  if (asOf.year() > y) return 12;
+  if (asOf.year() < y) return 0;
+  if (asOf.date() >= RENT_CHARGE_DAY) return asOf.month() + 1;
+  return asOf.month(); // 0 в январе до 15-го → долга по этому году ещё нет
+}
+
+/**
  * Задолженность по аренде (без коммуналки) + отдельный блок коммунальных.
- * Берём те же договоры и ту же формулу, что реестр «Аренда по счетам»:
- * debt = Σ аренда − Σ оплаты аренды по договору.
- * Помесячно — FIFO (оплаты закрывают месяцы с января).
+ * Договоры как в реестре, но только месяцы, по которым аренда уже начислена
+ * (после 15-го числа периода). Будущие месяцы в KPI не входят.
  */
 async function buildRentDebtAndUtilities(propertyId, year) {
   const registerRows = await listRentRegister(propertyId, year);
+  const dueThrough = maxDueRentMonth(year);
 
   const monthTotals = {};
   const debtBreakdown = [];
 
   for (const row of registerRows) {
-    const contractDebt = roundMoney(row.debt || 0);
-    if (contractDebt <= 0.005) continue;
+    // Годовые оплаты аренды по договору (как в реестре: totalRent − debt).
+    let paidLeft = Math.max(0, roundMoney((row.totalRent || 0) - (row.debt || 0)));
 
-    // Сколько оплат реально «съело» начисления (как в реестре).
-    let paidLeft = Math.max(0, roundMoney((row.totalRent || 0) - contractDebt));
+    let contractDebt = 0;
     const months = [];
-    for (let m = 1; m <= 12; m++) {
+    for (let m = 1; m <= dueThrough; m++) {
       const charged = Number(row.months?.[m]?.rent || 0);
       if (!charged && paidLeft <= 0) continue;
       const applied = Math.min(charged, paidLeft);
@@ -34,8 +48,11 @@ async function buildRentDebtAndUtilities(propertyId, year) {
       const debt = Math.max(0, charged - applied);
       if (debt <= 0.005) continue;
       months.push({ month: m, debt: roundMoney(debt) });
+      contractDebt = roundMoney(contractDebt + debt);
       monthTotals[m] = (monthTotals[m] || 0) + debt;
     }
+
+    if (contractDebt <= 0.005) continue;
 
     debtBreakdown.push({
       contractId: row.contractId,
