@@ -8,37 +8,39 @@ function roundMoney(value) {
 
 /**
  * Задолженность по аренде (без коммуналки) + отдельный блок коммунальных.
- * debt / debtMonths / debtBreakdown — только rent_charges − payments(type=rent).
+ *
+ * Как в реестре «Аренда по счетам»: по договору debt = Σ аренда за год − Σ оплаты аренды.
+ * Помесячная разбивка — FIFO: оплаты закрывают месяцы с января, остаток = долг месяца.
  * utilities — utility_charges и payments(type=utilities).
  */
 async function buildRentDebtAndUtilities(propertyId, year) {
   const rentRows = await db('rent_charges')
     .where({ property_id: propertyId, period_year: year })
     .whereNot('status', 'cancelled')
-    .select('contract_id', 'period_month')
+    .groupBy('contract_id', 'period_month')
     .sum('amount_with_vat as total')
-    .groupBy('contract_id', 'period_month');
+    .select('contract_id', 'period_month');
 
   const rentPayRows = await db('payments')
     .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-    .select('contract_id', 'period_month')
+    .groupBy('contract_id')
     .sum('amount as total')
-    .groupBy('contract_id', 'period_month');
+    .select('contract_id');
 
   const utilRows = await db('utility_charges')
     .where({ property_id: propertyId, period_year: year })
-    .select('period_month')
+    .groupBy('period_month')
     .sum('amount as total')
-    .groupBy('period_month');
+    .select('period_month');
 
   const utilPayRows = await db('payments')
     .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
-    .select('period_month')
+    .groupBy('period_month')
     .sum('amount as total')
-    .groupBy('period_month');
+    .select('period_month');
 
   const rentCharged = {};
-  const rentPaid = {};
+  const rentPaidByContract = {};
   const contractIds = new Set();
 
   for (const row of rentRows) {
@@ -51,11 +53,9 @@ async function buildRentDebtAndUtilities(propertyId, year) {
   }
   for (const row of rentPayRows) {
     const cid = Number(row.contract_id);
-    const m = Number(row.period_month);
-    if (!cid || !m) continue;
+    if (!cid) continue;
     contractIds.add(cid);
-    const key = `${cid}-${m}`;
-    rentPaid[key] = Number(row.total || 0);
+    rentPaidByContract[cid] = Number(row.total || 0);
   }
 
   const monthTotals = {};
@@ -63,17 +63,19 @@ async function buildRentDebtAndUtilities(propertyId, year) {
 
   for (const cid of contractIds) {
     byContract[cid] = { debt: 0, months: [] };
+    let paidLeft = rentPaidByContract[cid] || 0;
     for (let m = 1; m <= 12; m++) {
-      const key = `${cid}-${m}`;
-      const charged = rentCharged[key] || 0;
-      const paid = rentPaid[key] || 0;
-      if (!charged && !paid) continue;
-      const debt = Math.max(0, charged - paid);
+      const charged = rentCharged[`${cid}-${m}`] || 0;
+      if (!charged && paidLeft <= 0) continue;
+      const applied = Math.min(charged, paidLeft);
+      paidLeft = roundMoney(paidLeft - applied);
+      const debt = Math.max(0, charged - applied);
       if (debt <= 0.005) continue;
       byContract[cid].months.push({ month: m, debt: roundMoney(debt) });
       byContract[cid].debt = roundMoney(byContract[cid].debt + debt);
       monthTotals[m] = (monthTotals[m] || 0) + debt;
     }
+    // Оплаты без начислений не дают отрицательный долг — как в реестре.
   }
 
   const contracts = contractIds.size
