@@ -539,9 +539,15 @@ async function listPaymentsTable(query, orgId) {
   }));
 }
 
+function toDateInput(value) {
+  if (!value) return null;
+  const formatted = dayjs(value).format('YYYY-MM-DD');
+  return formatted === 'Invalid Date' ? null : formatted;
+}
+
 async function listRentRegister(propertyId, year, buildingId) {
   const bid = buildingId ? Number(buildingId) : null;
-  const cacheKey = `rent-register:v2:${propertyId}:${year}:${bid || 'all'}`;
+  const cacheKey = `rent-register:v3:${propertyId}:${year}:${bid || 'all'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid));
 }
@@ -550,6 +556,7 @@ function invalidateRentRegisterCache(propertyId) {
   if (propertyId) {
     cacheDelPrefix(`rent-register:${propertyId}:`);
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v3:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
   }
@@ -587,9 +594,11 @@ async function loadRentRegister(propertyId, year, bid) {
     .whereIn('c.status', ['active', 'expiring', 'terminated', 'completed'])
     .select(
       'c.id as contract_id',
+      'c.tenant_id',
       't.name as tenant_name',
       'c.contract_number',
       'c.contract_date',
+      'c.end_date',
       'c.status as contract_status',
       'c.rate_without_vat as contract_rate',
       'agg.total_area',
@@ -668,11 +677,22 @@ async function loadRentRegister(propertyId, year, bid) {
     const paid = paidMap[row.contract_id] || 0;
     // Задолженность = аренда только по уже начисленным месяцам − оплаты аренды за год.
     const debt = Math.max(0, dueRent - paid);
+    const contractNumber = row.contract_number || '';
+    const contractDate = toDateInput(row.contract_date);
+    const endDate = toDateInput(row.end_date);
     return {
       rowNum: idx + 1,
       contractId: row.contract_id,
+      tenantId: row.tenant_id,
       tenantName: row.tenant_name,
-      contractLabel: `${row.contract_number}${row.contract_date ? ` от ${dayjs(row.contract_date).format('DD.MM.YYYY')}` : ''}`,
+      contractNumber,
+      contractDate,
+      endDate,
+      contractLabel: contractNumber
+        ? `${contractNumber}${contractDate ? ` от ${dayjs(contractDate).format('DD.MM.YYYY')}` : ''}`
+        : contractDate
+          ? dayjs(contractDate).format('DD.MM.YYYY')
+          : '',
       area: Number(row.total_area) || 0,
       rateWithoutVat: Number(row.rate_without_vat) || Number(row.contract_rate) || 0,
       months,
@@ -683,6 +703,304 @@ async function loadRentRegister(propertyId, year, bid) {
       status: row.contract_status,
     };
   });
+}
+
+function splitGrossAmount(gross) {
+  const amountWithVat = Math.round(Number(gross) * 100) / 100;
+  const net = Math.round((amountWithVat / 1.2) * 100) / 100;
+  const vat = Math.round((amountWithVat - net) * 100) / 100;
+  return { amountWithVat, net, vat };
+}
+
+async function upsertRegisterRentCharge(contract, roomId, year, month, grossAmount, userId) {
+  const existing = await db('rent_charges')
+    .where({
+      contract_id: contract.id,
+      period_year: year,
+      period_month: month,
+    })
+    .whereNot('status', 'cancelled')
+    .first();
+
+  if (!grossAmount || grossAmount <= 0) {
+    if (existing) {
+      await db('rent_charges').where({ id: existing.id }).update({
+        status: 'cancelled',
+        amount_without_vat: 0,
+        vat_amount: 0,
+        amount_with_vat: 0,
+        manual_adjustment: true,
+        adjustment_reason: 'register_edit_zero',
+        updated_at: db.fn.now(),
+      });
+    }
+    return;
+  }
+
+  const { amountWithVat, net, vat } = splitGrossAmount(grossAmount);
+  const payload = {
+    organization_id: contract.organization_id,
+    property_id: contract.property_id,
+    tenant_id: contract.tenant_id,
+    contract_id: contract.id,
+    room_id: roomId,
+    period_year: year,
+    period_month: month,
+    area: Number(contract.area) || 0,
+    rate_without_vat: Number(contract.rate) || 0,
+    vat_rate: Number(contract.vat_rate) || 20,
+    amount_without_vat: net,
+    vat_amount: vat,
+    amount_with_vat: amountWithVat,
+    status: 'charged',
+    manual_adjustment: true,
+    updated_at: db.fn.now(),
+  };
+
+  if (existing) {
+    await db('rent_charges').where({ id: existing.id }).update(payload);
+    return;
+  }
+  await db('rent_charges').insert({ ...payload, created_by: userId || null });
+}
+
+async function upsertRegisterUtilityCharge(contract, year, month, amount, userId) {
+  const existingRows = await db('utility_charges')
+    .where({
+      contract_id: contract.id,
+      period_year: year,
+      period_month: month,
+    })
+    .orderBy('id', 'asc');
+
+  if (!amount || amount <= 0) {
+    if (existingRows.length) {
+      await db('utility_charges')
+        .whereIn(
+          'id',
+          existingRows.map((r) => r.id)
+        )
+        .delete();
+    }
+    return;
+  }
+
+  const rounded = Math.round(Number(amount) * 100) / 100;
+  const payload = {
+    organization_id: contract.organization_id,
+    property_id: contract.property_id,
+    tenant_id: contract.tenant_id,
+    contract_id: contract.id,
+    period_year: year,
+    period_month: month,
+    utility_type: existingRows[0]?.utility_type || 'other',
+    calculation_method: 'manual',
+    amount: rounded,
+    updated_at: db.fn.now(),
+  };
+
+  if (existingRows.length) {
+    const [first, ...rest] = existingRows;
+    await db('utility_charges').where({ id: first.id }).update(payload);
+    if (rest.length) {
+      await db('utility_charges')
+        .whereIn(
+          'id',
+          rest.map((r) => r.id)
+        )
+        .delete();
+    }
+    return;
+  }
+  await db('utility_charges').insert({ ...payload, created_by: userId || null });
+}
+
+async function upsertRegisterUtilityPaid(contract, year, month, amount, userId) {
+  const existing = await db('payments')
+    .where({
+      contract_id: contract.id,
+      period_year: year,
+      period_month: month,
+      payment_type: 'utilities',
+    })
+    .orderBy('id', 'asc');
+
+  if (!amount || amount <= 0) {
+    if (existing.length) {
+      await db('payments')
+        .whereIn(
+          'id',
+          existing.map((p) => p.id)
+        )
+        .delete();
+    }
+    return;
+  }
+
+  const rounded = Math.round(Number(amount) * 100) / 100;
+  const paymentDate = `${year}-${String(month).padStart(2, '0')}-15`;
+  if (existing.length) {
+    const [first, ...rest] = existing;
+    await db('payments').where({ id: first.id }).update({
+      amount: rounded,
+      payment_date: first.payment_date || paymentDate,
+      updated_at: db.fn.now(),
+    });
+    if (rest.length) {
+      await db('payments')
+        .whereIn(
+          'id',
+          rest.map((p) => p.id)
+        )
+        .delete();
+    }
+    return;
+  }
+
+  await db('payments').insert({
+    organization_id: contract.organization_id,
+    property_id: contract.property_id,
+    tenant_id: contract.tenant_id,
+    contract_id: contract.id,
+    payment_date: paymentDate,
+    amount: rounded,
+    payment_type: 'utilities',
+    period_year: year,
+    period_month: month,
+    purpose: 'Коммунальная оплата (реестр)',
+    created_by: userId || null,
+  });
+}
+
+async function updateRentRegisterRow(contractId, body, userId) {
+  const contract = await db('contracts').where({ id: contractId }).whereNull('deleted_at').first();
+  if (!contract) {
+    const err = new Error('Договор не найден');
+    err.status = 404;
+    throw err;
+  }
+
+  const year = Number(body.year) || new Date().getFullYear();
+
+  if (body.tenantName != null) {
+    const name = String(body.tenantName).trim();
+    if (name) {
+      await db('tenants').where({ id: contract.tenant_id }).update({
+        name,
+        updated_at: db.fn.now(),
+      });
+    }
+  }
+
+  const contractPatch = { updated_at: db.fn.now() };
+  if (body.contractNumber != null) contractPatch.contract_number = String(body.contractNumber).trim() || null;
+  if ('contractDate' in body) contractPatch.contract_date = body.contractDate || null;
+  if ('endDate' in body) contractPatch.end_date = body.endDate || null;
+  if (body.rateWithoutVat != null) contractPatch.rate_without_vat = Number(body.rateWithoutVat);
+  if (body.status != null) contractPatch.status = body.status;
+  await db('contracts').where({ id: contractId }).update(contractPatch);
+
+  const links = await db('contract_rooms').where({ contract_id: contractId }).orderBy('id', 'asc');
+  if (body.area != null || body.rateWithoutVat != null) {
+    if (links.length === 1) {
+      const patch = { updated_at: db.fn.now() };
+      if (body.area != null) patch.area = Number(body.area);
+      if (body.rateWithoutVat != null) patch.rate_without_vat = Number(body.rateWithoutVat);
+      await db('contract_rooms').where({ id: links[0].id }).update(patch);
+    } else if (links.length > 1) {
+      if (body.rateWithoutVat != null) {
+        await db('contract_rooms')
+          .where({ contract_id: contractId })
+          .update({ rate_without_vat: Number(body.rateWithoutVat), updated_at: db.fn.now() });
+      }
+      if (body.area != null) {
+        const total = links.reduce((s, l) => s + Number(l.area || 0), 0) || 1;
+        const target = Number(body.area);
+        for (const link of links) {
+          const share = (Number(link.area || 0) / total) * target;
+          await db('contract_rooms')
+            .where({ id: link.id })
+            .update({ area: Math.round(share * 100) / 100, updated_at: db.fn.now() });
+        }
+      }
+    }
+  }
+
+  const roomId = links[0]?.room_id || null;
+  const refreshed = await db('contracts').where({ id: contractId }).first();
+  const areaSum = (
+    await db('contract_rooms').where({ contract_id: contractId }).sum('area as total').first()
+  )?.total;
+  const chargeContract = {
+    id: refreshed.id,
+    organization_id: refreshed.organization_id,
+    property_id: refreshed.property_id,
+    tenant_id: refreshed.tenant_id,
+    vat_rate: refreshed.vat_rate,
+    area: Number(areaSum) || Number(body.area) || 0,
+    rate: Number(refreshed.rate_without_vat) || 0,
+  };
+
+  const months = body.months && typeof body.months === 'object' ? body.months : null;
+  if (months) {
+    for (const [monthKey, vals] of Object.entries(months)) {
+      const month = Number(monthKey);
+      if (!month || month < 1 || month > 12 || !vals) continue;
+      if ('rent' in vals) {
+        await upsertRegisterRentCharge(chargeContract, roomId, year, month, Number(vals.rent) || 0, userId);
+      }
+      if ('utility' in vals) {
+        await upsertRegisterUtilityCharge(chargeContract, year, month, Number(vals.utility) || 0, userId);
+      }
+      if ('utilityPaid' in vals) {
+        await upsertRegisterUtilityPaid(chargeContract, year, month, Number(vals.utilityPaid) || 0, userId);
+      }
+    }
+  }
+
+  invalidateRentRegisterCache(contract.property_id);
+  return { contractId: Number(contractId) };
+}
+
+async function deleteRentRegisterRow(contractId) {
+  const contract = await db('contracts').where({ id: contractId }).whereNull('deleted_at').first();
+  if (!contract) {
+    const err = new Error('Договор не найден');
+    err.status = 404;
+    throw err;
+  }
+
+  const links = await db('contract_rooms').where({ contract_id: contractId });
+  const roomIds = links.map((l) => l.room_id).filter(Boolean);
+
+  await db('rent_charges').where({ contract_id: contractId }).delete();
+  await db('utility_charges').where({ contract_id: contractId }).delete();
+  await db('payments').where({ contract_id: contractId }).delete();
+  await db('contract_rooms').where({ contract_id: contractId }).delete();
+  await db('contracts').where({ id: contractId }).update({
+    status: 'terminated',
+    deleted_at: db.fn.now(),
+    updated_at: db.fn.now(),
+  });
+
+  for (const roomId of roomIds) {
+    const stillLinked = await db('contract_rooms as cr')
+      .join('contracts as c', 'c.id', 'cr.contract_id')
+      .where('cr.room_id', roomId)
+      .whereNull('c.deleted_at')
+      .whereIn('c.status', ['active', 'expiring'])
+      .first();
+    if (!stillLinked) {
+      await db('rooms').where({ id: roomId }).update({
+        status: 'free',
+        current_rate_without_vat: null,
+        updated_at: db.fn.now(),
+      });
+    }
+  }
+
+  invalidateRentRegisterCache(contract.property_id);
+  return { contractId: Number(contractId) };
 }
 
 const PLAN_FACT_METRICS = [
@@ -1126,6 +1444,8 @@ module.exports = {
   listChargesTable,
   listPaymentsTable,
   listRentRegister,
+  updateRentRegisterRow,
+  deleteRentRegisterRow,
   invalidateRentRegisterCache,
   getPlanFactMatrix,
   upsertPlanFactCell,

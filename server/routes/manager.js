@@ -9,6 +9,8 @@ const {
   listChargesTable,
   listPaymentsTable,
   listRentRegister,
+  updateRentRegisterRow,
+  deleteRentRegisterRow,
   getPlanFactMatrix,
   upsertPlanFactCell,
   createPlanFactMetric,
@@ -130,6 +132,36 @@ router.get(
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=rent-register.xlsx');
     await wb.xlsx.write(res);
+  })
+);
+
+router.put(
+  '/rent-register/rows/:contractId',
+  requireRoles(...OPERATIONAL_ROLES),
+  asyncHandler(async (req, res) => {
+    const contractId = Number(req.params.contractId);
+    if (!contractId) return fail(res, 'Укажите contractId', 400);
+    try {
+      ok(res, await updateRentRegisterRow(contractId, req.body || {}, req.user.id));
+    } catch (e) {
+      if (e.status) return fail(res, e.message, e.status);
+      throw e;
+    }
+  })
+);
+
+router.delete(
+  '/rent-register/rows/:contractId',
+  requireRoles(...OPERATIONAL_ROLES),
+  asyncHandler(async (req, res) => {
+    const contractId = Number(req.params.contractId);
+    if (!contractId) return fail(res, 'Укажите contractId', 400);
+    try {
+      ok(res, await deleteRentRegisterRow(contractId));
+    } catch (e) {
+      if (e.status) return fail(res, e.message, e.status);
+      throw e;
+    }
   })
 );
 
