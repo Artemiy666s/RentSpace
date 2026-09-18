@@ -1,12 +1,14 @@
 /**
  * Централизованные списки ролей для API.
  * Директор — полный операционный доступ в рамках организации (как менеджер + бухгалтер + настройка объектов).
+ * Заместитель директора — тот же операционный доступ, без администрирования учётных записей.
  */
 
 const ROLES = Object.freeze({
   SUPER_ADMIN: 'super_admin',
   ORG_ADMIN: 'org_admin',
   DIRECTOR: 'director',
+  DEPUTY_DIRECTOR: 'deputy_director',
   MANAGER: 'manager',
   OWNER: 'owner',
   ACCOUNTANT: 'accountant',
@@ -18,13 +20,20 @@ const DATA_READ_ROLES = [
   ROLES.SUPER_ADMIN,
   ROLES.ORG_ADMIN,
   ROLES.DIRECTOR,
+  ROLES.DEPUTY_DIRECTOR,
   ROLES.MANAGER,
   ROLES.OWNER,
   ROLES.ACCOUNTANT,
 ];
 
 /** Операционное управление (помещения, переговоры, закрытие месяца, карты) */
-const OPERATIONAL_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DIRECTOR, ROLES.MANAGER];
+const OPERATIONAL_ROLES = [
+  ROLES.SUPER_ADMIN,
+  ROLES.ORG_ADMIN,
+  ROLES.DIRECTOR,
+  ROLES.DEPUTY_DIRECTOR,
+  ROLES.MANAGER,
+];
 
 /** Операции с помещениями и договорами на объекте */
 const OPERATIONAL_WRITE_ROLES = [...OPERATIONAL_ROLES, ROLES.OWNER];
@@ -42,18 +51,30 @@ const MAP_EDIT_ROLES = [...OPERATIONAL_ROLES];
 const PROPERTY_ADMIN_ROLES = [...OPERATIONAL_ROLES];
 
 /** Импорт Excel, администрирование данных организации */
-const ORG_DATA_ADMIN_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DIRECTOR];
+const ORG_DATA_ADMIN_ROLES = [
+  ROLES.SUPER_ADMIN,
+  ROLES.ORG_ADMIN,
+  ROLES.DIRECTOR,
+  ROLES.DEPUTY_DIRECTOR,
+];
 
 /** Учётные записи сотрудников организации */
 const ORG_USER_ADMIN_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DIRECTOR];
 
 /** Роли, которые может назначать директор */
-const DIRECTOR_ASSIGNABLE_ROLES = [ROLES.DIRECTOR, ROLES.MANAGER, ROLES.ACCOUNTANT, ROLES.VIEWER];
+const DIRECTOR_ASSIGNABLE_ROLES = [
+  ROLES.DIRECTOR,
+  ROLES.DEPUTY_DIRECTOR,
+  ROLES.MANAGER,
+  ROLES.ACCOUNTANT,
+  ROLES.VIEWER,
+];
 
 /** Роли, которые может назначать администратор организации */
 const ORG_ADMIN_ASSIGNABLE_ROLES = [
   ROLES.ORG_ADMIN,
   ROLES.DIRECTOR,
+  ROLES.DEPUTY_DIRECTOR,
   ROLES.MANAGER,
   ROLES.ACCOUNTANT,
   ROLES.VIEWER,
