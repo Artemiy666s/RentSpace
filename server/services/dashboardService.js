@@ -1,6 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { getMonthReadiness } = require('./monthCloseService');
+const { listRentRegister } = require('./managerDataService');
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -8,24 +9,55 @@ function roundMoney(value) {
 
 /**
  * Задолженность по аренде (без коммуналки) + отдельный блок коммунальных.
- *
- * Как в реестре «Аренда по счетам»: по договору debt = Σ аренда за год − Σ оплаты аренды.
- * Помесячная разбивка — FIFO: оплаты закрывают месяцы с января, остаток = долг месяца.
- * utilities — utility_charges и payments(type=utilities).
+ * Берём те же договоры и ту же формулу, что реестр «Аренда по счетам»:
+ * debt = Σ аренда − Σ оплаты аренды по договору.
+ * Помесячно — FIFO (оплаты закрывают месяцы с января).
  */
 async function buildRentDebtAndUtilities(propertyId, year) {
-  const rentRows = await db('rent_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .whereNot('status', 'cancelled')
-    .groupBy('contract_id', 'period_month')
-    .sum('amount_with_vat as total')
-    .select('contract_id', 'period_month');
+  const registerRows = await listRentRegister(propertyId, year);
 
-  const rentPayRows = await db('payments')
-    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-    .groupBy('contract_id')
-    .sum('amount as total')
-    .select('contract_id');
+  const monthTotals = {};
+  const debtBreakdown = [];
+
+  for (const row of registerRows) {
+    const contractDebt = roundMoney(row.debt || 0);
+    if (contractDebt <= 0.005) continue;
+
+    // Сколько оплат реально «съело» начисления (как в реестре).
+    let paidLeft = Math.max(0, roundMoney((row.totalRent || 0) - contractDebt));
+    const months = [];
+    for (let m = 1; m <= 12; m++) {
+      const charged = Number(row.months?.[m]?.rent || 0);
+      if (!charged && paidLeft <= 0) continue;
+      const applied = Math.min(charged, paidLeft);
+      paidLeft = roundMoney(paidLeft - applied);
+      const debt = Math.max(0, charged - applied);
+      if (debt <= 0.005) continue;
+      months.push({ month: m, debt: roundMoney(debt) });
+      monthTotals[m] = (monthTotals[m] || 0) + debt;
+    }
+
+    debtBreakdown.push({
+      contractId: row.contractId,
+      tenantName: row.tenantName || '—',
+      contractNumber: row.contractLabel || String(row.contractId),
+      debt: contractDebt,
+      months: months.sort((a, b) => b.month - a.month),
+    });
+  }
+
+  debtBreakdown.sort((a, b) => b.debt - a.debt || a.tenantName.localeCompare(b.tenantName, 'ru'));
+
+  const debtMonths = Object.entries(monthTotals)
+    .map(([month, amount]) => ({
+      year,
+      month: Number(month),
+      amount: roundMoney(amount),
+    }))
+    .filter((row) => row.amount > 0.005)
+    .sort((a, b) => b.month - a.month);
+
+  const debt = roundMoney(debtBreakdown.reduce((s, row) => s + row.debt, 0));
 
   const utilRows = await db('utility_charges')
     .where({ property_id: propertyId, period_year: year })
@@ -38,88 +70,6 @@ async function buildRentDebtAndUtilities(propertyId, year) {
     .groupBy('period_month')
     .sum('amount as total')
     .select('period_month');
-
-  const rentCharged = {};
-  const rentPaidByContract = {};
-  const contractIds = new Set();
-
-  for (const row of rentRows) {
-    const cid = Number(row.contract_id);
-    const m = Number(row.period_month);
-    if (!cid || !m) continue;
-    contractIds.add(cid);
-    const key = `${cid}-${m}`;
-    rentCharged[key] = Number(row.total || 0);
-  }
-  for (const row of rentPayRows) {
-    const cid = Number(row.contract_id);
-    if (!cid) continue;
-    contractIds.add(cid);
-    rentPaidByContract[cid] = Number(row.total || 0);
-  }
-
-  const monthTotals = {};
-  const byContract = {};
-
-  for (const cid of contractIds) {
-    byContract[cid] = { debt: 0, months: [] };
-    let paidLeft = rentPaidByContract[cid] || 0;
-    for (let m = 1; m <= 12; m++) {
-      const charged = rentCharged[`${cid}-${m}`] || 0;
-      if (!charged && paidLeft <= 0) continue;
-      const applied = Math.min(charged, paidLeft);
-      paidLeft = roundMoney(paidLeft - applied);
-      const debt = Math.max(0, charged - applied);
-      if (debt <= 0.005) continue;
-      byContract[cid].months.push({ month: m, debt: roundMoney(debt) });
-      byContract[cid].debt = roundMoney(byContract[cid].debt + debt);
-      monthTotals[m] = (monthTotals[m] || 0) + debt;
-    }
-    // Оплаты без начислений не дают отрицательный долг — как в реестре.
-  }
-
-  const contracts = contractIds.size
-    ? await db('contracts as c')
-        .leftJoin('tenants as t', 't.id', 'c.tenant_id')
-        .whereIn('c.id', [...contractIds])
-        .select('c.id', 'c.contract_number', 't.name as tenant_name')
-    : [];
-  const contractMeta = Object.fromEntries(
-    contracts.map((c) => [
-      c.id,
-      {
-        tenantName: c.tenant_name || '—',
-        contractNumber: c.contract_number || String(c.id),
-      },
-    ])
-  );
-
-  const debtBreakdown = [...contractIds]
-    .map((cid) => {
-      const row = byContract[cid];
-      if (!row || row.debt <= 0.005) return null;
-      const meta = contractMeta[cid] || {};
-      return {
-        contractId: cid,
-        tenantName: meta.tenantName || '—',
-        contractNumber: meta.contractNumber || String(cid),
-        debt: row.debt,
-        months: row.months.sort((a, b) => b.month - a.month),
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.debt - a.debt || a.tenantName.localeCompare(b.tenantName, 'ru'));
-
-  const debtMonths = Object.entries(monthTotals)
-    .map(([month, amount]) => ({
-      year,
-      month: Number(month),
-      amount: roundMoney(amount),
-    }))
-    .filter((row) => row.amount > 0.005)
-    .sort((a, b) => b.month - a.month);
-
-  const debt = roundMoney(debtMonths.reduce((s, row) => s + row.amount, 0));
 
   const utilChargedMap = Object.fromEntries(utilRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
   const utilPaidMap = Object.fromEntries(utilPayRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
