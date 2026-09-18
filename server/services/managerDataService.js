@@ -550,9 +550,15 @@ async function listRentRegister(propertyId, year, buildingId) {
 
   const utilByContractMonth = await db('utility_charges')
     .where({ property_id: propertyId, period_year: year })
-    .select('contract_id', 'period_month')
+    .groupBy('contract_id', 'period_month')
     .sum('amount as total')
-    .groupBy('contract_id', 'period_month');
+    .select('contract_id', 'period_month');
+
+  const utilPayByContractMonth = await db('payments')
+    .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
+    .groupBy('contract_id', 'period_month')
+    .sum('amount as total')
+    .select('contract_id', 'period_month');
 
   const rentMap = {};
   for (const row of rentByContractMonth) {
@@ -563,6 +569,11 @@ async function listRentRegister(propertyId, year, buildingId) {
   for (const row of utilByContractMonth) {
     const key = `${row.contract_id}-${row.period_month}`;
     utilMap[key] = Number(row.total);
+  }
+  const utilPaidMap = {};
+  for (const row of utilPayByContractMonth) {
+    const key = `${row.contract_id}-${row.period_month}`;
+    utilPaidMap[key] = Number(row.total);
   }
 
   const paymentsByContract = await db('payments')
@@ -583,6 +594,7 @@ async function listRentRegister(propertyId, year, buildingId) {
       months[m] = {
         rent: rentMap[rk] || 0,
         utility: utilMap[rk] || 0,
+        utilityPaid: utilPaidMap[rk] || 0,
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;

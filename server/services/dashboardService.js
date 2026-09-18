@@ -89,31 +89,23 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
 
   const debt = roundMoney(debtBreakdown.reduce((s, row) => s + row.debt, 0));
 
-  const utilRows = await db('utility_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .groupBy('period_month')
-    .sum('amount as total')
-    .select('period_month');
-
-  const utilPayRows = await db('payments')
-    .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
-    .groupBy('period_month')
-    .sum('amount as total')
-    .select('period_month');
-
-  const utilChargedMap = Object.fromEntries(utilRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
-  const utilPaidMap = Object.fromEntries(utilPayRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
   const utilDueThrough = maxDueUtilityMonth(year);
   const utilMonths = [];
   for (let m = 1; m <= utilDueThrough; m++) {
-    const charged = utilChargedMap[m] || 0;
-    const paid = utilPaidMap[m] || 0;
+    let charged = 0;
+    let paid = 0;
+    for (const row of registerRows) {
+      charged += Number(row.months?.[m]?.utility || 0);
+      paid += Number(row.months?.[m]?.utilityPaid || 0);
+    }
+    charged = roundMoney(charged);
+    paid = roundMoney(paid);
     if (!charged && !paid) continue;
     utilMonths.push({
       year,
       month: m,
-      charged: roundMoney(charged),
-      paid: roundMoney(paid),
+      charged,
+      paid,
     });
   }
   utilMonths.sort((a, b) => b.month - a.month);
@@ -137,28 +129,11 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     const cutoff =
       dayjs().date() >= CHARGE_DAY ? dayjs().subtract(1, 'month') : dayjs().subtract(2, 'month');
     if (cutoff.year() !== year) {
-      const prevCharged = await db('utility_charges')
-        .where({
-          property_id: propertyId,
-          period_year: cutoff.year(),
-          period_month: cutoff.month() + 1,
-        })
-        .sum('amount as total')
-        .first();
-      const prevPaid = await db('payments')
-        .where({
-          property_id: propertyId,
-          period_year: cutoff.year(),
-          period_month: cutoff.month() + 1,
-          payment_type: 'utilities',
-        })
-        .sum('amount as total')
-        .first();
       utilitiesPrevMonth = {
         year: cutoff.year(),
         month: cutoff.month() + 1,
-        charged: roundMoney(prevCharged?.total),
-        paid: roundMoney(prevPaid?.total),
+        charged: 0,
+        paid: 0,
       };
     }
   }
