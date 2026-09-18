@@ -15,3 +15,4 @@ pxz.json
 *.xlsx
 *.xls
 /data/*.xlsx
+.env*
