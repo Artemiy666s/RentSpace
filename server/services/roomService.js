@@ -23,54 +23,77 @@ async function getRoomDetails(roomId) {
     utilMonth = maxDueUtilityMonth(utilYear) || 12;
   }
 
-  const [property, building, floor, activeLink, negotiation, charges, utilityCharges] =
-    await Promise.all([
-      db('properties').where({ id: room.property_id }).first(),
-      db('buildings').where({ id: room.building_id }).first(),
-      db('floors').where({ id: room.floor_id }).first(),
-      db('contract_rooms as cr')
-        .join('contracts as c', 'c.id', 'cr.contract_id')
-        .join('tenants as t', 't.id', 'c.tenant_id')
-        .where('cr.room_id', roomId)
-        .where('c.status', 'active')
-        .where(function () {
-          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
-        })
-        .select(
-          'c.*',
-          't.name as tenant_name',
-          't.id as tenant_id',
-          't.status as tenant_status',
-          'cr.area as contract_area',
-          'cr.rate_without_vat as room_rate'
-        )
-        .first(),
-      db('room_negotiations')
-        .where({ room_id: roomId })
-        .whereNot('status', 'converted')
-        .whereNot('status', 'declined')
-        .orderBy('updated_at', 'desc')
-        .first()
-        .catch(() => null),
-      db('rent_charges')
-        .where({ room_id: roomId, period_year: rentYear, period_month: rentMonth })
-        .whereNot('status', 'cancelled'),
-      db('utility_charges')
-        .where({ room_id: roomId, period_year: utilYear, period_month: utilMonth })
-        .sum('amount as total')
-        .first()
-        .catch(() => ({ total: 0 })),
-    ]);
+  const [property, building, floor, activeLink, negotiation] = await Promise.all([
+    db('properties').where({ id: room.property_id }).first(),
+    db('buildings').where({ id: room.building_id }).first(),
+    db('floors').where({ id: room.floor_id }).first(),
+    db('contract_rooms as cr')
+      .join('contracts as c', 'c.id', 'cr.contract_id')
+      .join('tenants as t', 't.id', 'c.tenant_id')
+      .where('cr.room_id', roomId)
+      .where('c.status', 'active')
+      .where(function () {
+        this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
+      })
+      .select(
+        'c.*',
+        't.name as tenant_name',
+        't.id as tenant_id',
+        't.status as tenant_status',
+        'cr.area as contract_area',
+        'cr.rate_without_vat as room_rate'
+      )
+      .first(),
+    db('room_negotiations')
+      .where({ room_id: roomId })
+      .whereNot('status', 'converted')
+      .whereNot('status', 'declined')
+      .orderBy('updated_at', 'desc')
+      .first()
+      .catch(() => null),
+  ]);
+
+  // Начисления лежат в rent_charges. Если строки нет (сдача до 15-го / снос автогенерации) —
+  // один раз дописываем только уже наступивший месяц и читаем уже сохранённую сумму.
+  if (activeLink) {
+    const organizationId =
+      activeLink.organization_id || property?.organization_id || null;
+    if (organizationId) {
+      await ensureDueRentCharges({
+        organizationId,
+        propertyId: room.property_id,
+        fromDate: activeLink.start_date,
+        contractId: activeLink.id,
+        roomId,
+        onlyLastDue: true,
+        userId: null,
+      }).catch(() => {});
+    }
+  }
+
+  const [charges, utilityCharges, payments] = await Promise.all([
+    db('rent_charges')
+      .where({ room_id: roomId, period_year: rentYear, period_month: rentMonth })
+      .whereNot('status', 'cancelled'),
+    db('utility_charges')
+      .where({ room_id: roomId, period_year: utilYear, period_month: utilMonth })
+      .sum('amount as total')
+      .first()
+      .catch(() => ({ total: 0 })),
+    activeLink
+      ? db('payments')
+          .where({
+            tenant_id: activeLink.tenant_id,
+            period_year: rentYear,
+            period_month: rentMonth,
+          })
+          .sum('amount as total')
+          .first()
+      : Promise.resolve({ total: 0 }),
+  ]);
 
   const charged = charges.reduce((s, c) => s + Number(c.amount_with_vat), 0);
   const utilities = Number(utilityCharges?.total || 0);
-  const payments = activeLink
-    ? await db('payments')
-        .where({ tenant_id: activeLink.tenant_id, period_year: rentYear, period_month: rentMonth })
-        .sum('amount as total')
-        .first()
-    : { total: 0 };
-
   const paid = Number(payments?.total || 0);
   const debt = Math.max(0, charged - paid);
 

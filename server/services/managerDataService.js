@@ -1,7 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { maxDueRentMonth } = require('../utils/billingPeriod');
-const { lastDueRentYm } = require('./chargeService');
+const { lastDueRentYm, ensureDueRentCharges } = require('./chargeService');
 const { cacheWrap, cacheDelPrefix } = require('../utils/ttlCache');
 
 const MONTH_NAMES = [
@@ -49,6 +49,16 @@ async function listRoomsTable(query, orgId) {
   const due = lastDueRentYm();
   const year = Number(query.year) || due.year;
   const month = Number(query.month) || due.month;
+
+  // Дописываем отсутствующее начисление за уже наступивший месяц (хранится в БД).
+  if (query.propertyId && orgId) {
+    await ensureDueRentCharges({
+      organizationId: orgId,
+      propertyId: Number(query.propertyId),
+      onlyLastDue: true,
+      userId: null,
+    }).catch(() => {});
+  }
 
   let q = db('rooms as r')
     .join('properties as p', 'p.id', 'r.property_id')
@@ -544,6 +554,17 @@ function invalidateRentRegisterCache(propertyId) {
 }
 
 async function loadRentRegister(propertyId, year, bid) {
+  const property = await db('properties').where({ id: propertyId }).first();
+  if (property?.organization_id) {
+    await ensureDueRentCharges({
+      organizationId: property.organization_id,
+      propertyId,
+      fromDate: `${year}-01-01`,
+      onlyLastDue: true,
+      userId: null,
+    }).catch(() => {});
+  }
+
   const roomAgg = db('contract_rooms as cr')
     .join('rooms as r', 'r.id', 'cr.room_id')
     .whereNull('r.deleted_at')
