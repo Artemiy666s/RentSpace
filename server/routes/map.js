@@ -109,11 +109,18 @@ async function buildPlanPayload(plan, floorId) {
     return { plan: null, shapes: [], rooms: [], floorRooms: [] };
   }
 
-  const shapes = await db('room_shapes as rs')
-    .join('rooms as r', 'r.id', 'rs.room_id')
-    .where({ 'rs.floor_plan_id': plan.id, 'rs.is_active': true })
-    .whereNull('r.deleted_at')
-    .select('rs.*', 'r.room_number', 'r.name as room_name', 'r.area', 'r.status', 'r.room_type');
+  const [shapes, floorRooms] = await Promise.all([
+    db('room_shapes as rs')
+      .join('rooms as r', 'r.id', 'rs.room_id')
+      .where({ 'rs.floor_plan_id': plan.id, 'rs.is_active': true })
+      .whereNull('r.deleted_at')
+      .select('rs.*', 'r.room_number', 'r.name as room_name', 'r.area', 'r.status', 'r.room_type'),
+    db('rooms')
+      .where({ floor_id: floorId })
+      .whereNull('deleted_at')
+      .orderBy('room_number')
+      .select('id', 'room_number', 'name', 'area', 'status', 'room_type'),
+  ]);
 
   const rooms = shapes.map((s) => {
     const pointsJson = parsePointsJson(s.points_json);
@@ -135,12 +142,6 @@ async function buildPlanPayload(plan, floorId) {
   });
 
   const shapedIds = new Set(rooms.map((r) => r.id));
-  const floorRooms = await db('rooms')
-    .where({ floor_id: floorId })
-    .whereNull('deleted_at')
-    .orderBy('room_number')
-    .select('id', 'room_number', 'name', 'area', 'status', 'room_type');
-
   const floorRoomsMeta = floorRooms.map((r) => ({
     id: r.id,
     roomNumber: r.room_number,

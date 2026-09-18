@@ -5,46 +5,16 @@ const { recordRoomStatusChange } = require('../utils/roomStatusHistory');
 const { normalizeLegalTypeForDb } = require('../utils/legalType');
 const { ensureDueRentCharges, lastDueRentYm } = require('./chargeService');
 const { maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
+const { invalidateRentRegisterCache } = require('./managerDataService');
 
 async function getRoomDetails(roomId) {
   const room = await db('rooms').whereNull('deleted_at').where({ id: roomId }).first();
   if (!room) return null;
 
-  const property = await db('properties').where({ id: room.property_id }).first();
-  const building = await db('buildings').where({ id: room.building_id }).first();
-  const floor = await db('floors').where({ id: room.floor_id }).first();
-  const activeLink = await db('contract_rooms as cr')
-    .join('contracts as c', 'c.id', 'cr.contract_id')
-    .join('tenants as t', 't.id', 'c.tenant_id')
-    .where('cr.room_id', roomId)
-    .where('c.status', 'active')
-    .where(function () {
-      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
-    })
-    .select(
-      'c.*',
-      't.name as tenant_name',
-      't.id as tenant_id',
-      't.status as tenant_status',
-      'cr.area as contract_area',
-      'cr.rate_without_vat as room_rate'
-    )
-    .first();
-
-  const negotiation = await db('room_negotiations')
-    .where({ room_id: roomId })
-    .whereNot('status', 'converted')
-    .whereNot('status', 'declined')
-    .orderBy('updated_at', 'desc')
-    .first()
-    .catch(() => null);
-
-  // Аренда: последний наступивший месяц (после 15-го, Europe/Minsk)
   const rentDue = lastDueRentYm();
   const rentYear = rentDue.year;
   const rentMonth = rentDue.month;
 
-  // Коммуналка: после 15-го следующего месяца
   const minsk = nowInMinsk();
   let utilYear = minsk.year;
   let utilMonth = maxDueUtilityMonth(utilYear);
@@ -53,15 +23,44 @@ async function getRoomDetails(roomId) {
     utilMonth = maxDueUtilityMonth(utilYear) || 12;
   }
 
-  const charges = await db('rent_charges')
-    .where({ room_id: roomId, period_year: rentYear, period_month: rentMonth })
-    .whereNot('status', 'cancelled');
-
-  const utilityCharges = await db('utility_charges')
-    .where({ room_id: roomId, period_year: utilYear, period_month: utilMonth })
-    .sum('amount as total')
-    .first()
-    .catch(() => ({ total: 0 }));
+  const [property, building, floor, activeLink, negotiation, charges, utilityCharges] =
+    await Promise.all([
+      db('properties').where({ id: room.property_id }).first(),
+      db('buildings').where({ id: room.building_id }).first(),
+      db('floors').where({ id: room.floor_id }).first(),
+      db('contract_rooms as cr')
+        .join('contracts as c', 'c.id', 'cr.contract_id')
+        .join('tenants as t', 't.id', 'c.tenant_id')
+        .where('cr.room_id', roomId)
+        .where('c.status', 'active')
+        .where(function () {
+          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
+        })
+        .select(
+          'c.*',
+          't.name as tenant_name',
+          't.id as tenant_id',
+          't.status as tenant_status',
+          'cr.area as contract_area',
+          'cr.rate_without_vat as room_rate'
+        )
+        .first(),
+      db('room_negotiations')
+        .where({ room_id: roomId })
+        .whereNot('status', 'converted')
+        .whereNot('status', 'declined')
+        .orderBy('updated_at', 'desc')
+        .first()
+        .catch(() => null),
+      db('rent_charges')
+        .where({ room_id: roomId, period_year: rentYear, period_month: rentMonth })
+        .whereNot('status', 'cancelled'),
+      db('utility_charges')
+        .where({ room_id: roomId, period_year: utilYear, period_month: utilMonth })
+        .sum('amount as total')
+        .first()
+        .catch(() => ({ total: 0 })),
+    ]);
 
   const charged = charges.reduce((s, c) => s + Number(c.amount_with_vat), 0);
   const utilities = Number(utilityCharges?.total || 0);
@@ -73,7 +72,6 @@ async function getRoomDetails(roomId) {
     : { total: 0 };
 
   const paid = Number(payments?.total || 0);
-  // Задолженность по аренде за наступивший месяц (коммуналка отдельно в UI)
   const debt = Math.max(0, charged - paid);
 
   const vatRate = activeLink ? Number(activeLink.vat_rate) : 20;
@@ -87,7 +85,9 @@ async function getRoomDetails(roomId) {
     building,
     floor,
     contract: activeLink || null,
-    tenant: activeLink ? { id: activeLink.tenant_id, name: activeLink.tenant_name, status: activeLink.tenant_status } : null,
+    tenant: activeLink
+      ? { id: activeLink.tenant_id, name: activeLink.tenant_name, status: activeLink.tenant_status }
+      : null,
     negotiation: negotiation || null,
     monthlyCharged: charged,
     monthlyUtilities: utilities,
@@ -264,6 +264,7 @@ async function rentOutRoom({
     fromDate: startDate,
     userId,
   });
+  invalidateRentRegisterCache(propertyId);
 
   return { contractId, roomId, tenantId: resolvedTenantId };
 }

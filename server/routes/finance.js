@@ -3,6 +3,7 @@ const { db } = require('../db');
 const { authenticate, requireRoles } = require('../middlewares/auth');
 const { requireOrgAccess } = require('../middlewares/orgAccess');
 const { generateRentCharges } = require('../services/chargeService');
+const { invalidateRentRegisterCache } = require('../services/managerDataService');
 const {
   buildRentChargesWorkbook,
   buildPaymentsWorkbook,
@@ -62,6 +63,7 @@ router.post(
       month: req.body.month,
       userId: req.user.id,
     });
+    invalidateRentRegisterCache(req.body.propertyId);
     ok(res, { created: ids.length, ids });
   })
 );
@@ -191,6 +193,7 @@ router.post(
       comment: req.body.comment,
       created_by: req.user.id,
     });
+    invalidateRentRegisterCache(req.body.propertyId);
     ok(res, { id }, 201);
   })
 );

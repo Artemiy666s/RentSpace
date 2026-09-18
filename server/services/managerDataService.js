@@ -2,6 +2,7 @@ const dayjs = require('dayjs');
 const { db } = require('../db');
 const { maxDueRentMonth } = require('../utils/billingPeriod');
 const { lastDueRentYm } = require('./chargeService');
+const { cacheWrap, cacheDelPrefix } = require('../utils/ttlCache');
 
 const MONTH_NAMES = [
   'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
@@ -181,24 +182,30 @@ async function listTenantsTable(query, orgId) {
     });
   }
   const rows = await q.orderBy('t.name');
-  return Promise.all(
-    rows.map(async (t) => {
-      const cnt = await db('contracts').where({ tenant_id: t.id, status: 'active' }).count('id as c').first();
-      return {
-        id: t.id,
-        name: t.name,
-        legalType: t.legal_type,
-        unp: t.unp,
-        contactPerson: t.contact_person,
-        phone: t.phone,
-        email: t.email,
-        status: t.status,
-        activeContracts: Number(cnt?.c || 0),
-        comment: t.comment,
-        updatedAt: t.updated_at,
-      };
-    })
-  );
+  const ids = rows.map((t) => t.id);
+  const counts = ids.length
+    ? await db('contracts')
+        .whereIn('tenant_id', ids)
+        .where({ status: 'active' })
+        .groupBy('tenant_id')
+        .count('id as c')
+        .select('tenant_id')
+    : [];
+  const countMap = Object.fromEntries(counts.map((r) => [r.tenant_id, Number(r.c)]));
+
+  return rows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    legalType: t.legal_type,
+    unp: t.unp,
+    contactPerson: t.contact_person,
+    phone: t.phone,
+    email: t.email,
+    status: t.status,
+    activeContracts: countMap[t.id] || 0,
+    comment: t.comment,
+    updatedAt: t.updated_at,
+  }));
 }
 
 async function computeContractsDebt(propertyId, year, contractIds) {
@@ -522,7 +529,17 @@ async function listPaymentsTable(query, orgId) {
 
 async function listRentRegister(propertyId, year, buildingId) {
   const bid = buildingId ? Number(buildingId) : null;
+  const cacheKey = `rent-register:${propertyId}:${year}:${bid || 'all'}`;
 
+  return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid));
+}
+
+function invalidateRentRegisterCache(propertyId) {
+  if (propertyId) cacheDelPrefix(`rent-register:${propertyId}:`);
+  else cacheDelPrefix('rent-register:');
+}
+
+async function loadRentRegister(propertyId, year, bid) {
   const roomAgg = db('contract_rooms as cr')
     .join('rooms as r', 'r.id', 'cr.room_id')
     .whereNull('r.deleted_at')
@@ -553,30 +570,30 @@ async function listRentRegister(propertyId, year, buildingId) {
     )
     .orderBy('t.name', 'asc');
 
-  const rentByContractMonth = await db('rent_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .whereNot('status', 'cancelled')
-    .groupBy('contract_id', 'period_month')
-    .sum('amount_with_vat as total')
-    .select('contract_id', 'period_month');
-
-  const rentPayByContractMonth = await db('payments')
-    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-    .groupBy('contract_id', 'period_month')
-    .sum('amount as total')
-    .select('contract_id', 'period_month');
-
-  const utilByContractMonth = await db('utility_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .groupBy('contract_id', 'period_month')
-    .sum('amount as total')
-    .select('contract_id', 'period_month');
-
-  const utilPayByContractMonth = await db('payments')
-    .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
-    .groupBy('contract_id', 'period_month')
-    .sum('amount as total')
-    .select('contract_id', 'period_month');
+  const [rentByContractMonth, rentPayByContractMonth, utilByContractMonth, utilPayByContractMonth] =
+    await Promise.all([
+      db('rent_charges')
+        .where({ property_id: propertyId, period_year: year })
+        .whereNot('status', 'cancelled')
+        .groupBy('contract_id', 'period_month')
+        .sum('amount_with_vat as total')
+        .select('contract_id', 'period_month'),
+      db('payments')
+        .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+        .groupBy('contract_id', 'period_month')
+        .sum('amount as total')
+        .select('contract_id', 'period_month'),
+      db('utility_charges')
+        .where({ property_id: propertyId, period_year: year })
+        .groupBy('contract_id', 'period_month')
+        .sum('amount as total')
+        .select('contract_id', 'period_month'),
+      db('payments')
+        .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
+        .groupBy('contract_id', 'period_month')
+        .sum('amount as total')
+        .select('contract_id', 'period_month'),
+    ]);
 
   const rentMap = {};
   for (const row of rentByContractMonth) {
@@ -584,9 +601,12 @@ async function listRentRegister(propertyId, year, buildingId) {
     rentMap[key] = Number(row.total);
   }
   const rentPaidMap = {};
+  const paidMap = {};
   for (const row of rentPayByContractMonth) {
     const key = `${row.contract_id}-${row.period_month}`;
-    rentPaidMap[key] = Number(row.total);
+    const amount = Number(row.total);
+    rentPaidMap[key] = amount;
+    paidMap[row.contract_id] = (paidMap[row.contract_id] || 0) + amount;
   }
   const utilMap = {};
   for (const row of utilByContractMonth) {
@@ -598,15 +618,6 @@ async function listRentRegister(propertyId, year, buildingId) {
     const key = `${row.contract_id}-${row.period_month}`;
     utilPaidMap[key] = Number(row.total);
   }
-
-  const paymentsByContract = await db('payments')
-    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-    .groupBy('contract_id')
-    .sum('amount as total')
-    .select('contract_id');
-  const paidMap = Object.fromEntries(
-    paymentsByContract.map((p) => [p.contract_id, Number(p.total)])
-  );
 
   const dueThrough = maxDueRentMonth(year);
 
@@ -1088,6 +1099,7 @@ module.exports = {
   listChargesTable,
   listPaymentsTable,
   listRentRegister,
+  invalidateRentRegisterCache,
   getPlanFactMatrix,
   upsertPlanFactCell,
   createPlanFactMetric,

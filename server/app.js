@@ -7,8 +7,12 @@ const cors = require('cors');
 const config = require('./config');
 const apiRoutes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
+const { ensurePerfIndexes } = require('./utils/ensurePerfIndexes');
 
 const app = express();
+
+// Фоном: индексы для быстрых реестра/дашборда/карты (не блокирует старт)
+void ensurePerfIndexes();
 
 // Ensure upload directories exist
 const uploadDirs = [

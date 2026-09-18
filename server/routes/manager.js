@@ -20,6 +20,7 @@ const {
 const { checkMonth, closeMonth, getMonthReadiness } = require('../services/monthCloseService');
 const { startNegotiation, updateNegotiation } = require('../services/negotiationService');
 const { generateRentCharges } = require('../services/chargeService');
+const { invalidateRentRegisterCache } = require('../services/managerDataService');
 const {
   buildRentRegisterWorkbook,
   buildFullRentRegisterWorkbook,
@@ -419,6 +420,7 @@ router.post(
       month: req.body.month,
       userId: req.user.id,
     });
+    invalidateRentRegisterCache(req.body.propertyId);
     ok(res, { created: ids.length, ids });
   })
 );

@@ -98,22 +98,56 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
 
 /** KPI, графики и аналитика — одни и те же для директора, зама и заведующей */
 async function buildDirectorAnalytics(propertyId, organizationId) {
-  const rooms = await db('rooms')
-    .where({ property_id: propertyId })
-    .whereNull('deleted_at');
+  const minsk = nowInMinsk();
+  const year = minsk.year;
+  const rentPeriodMonth = maxDueRentMonth(year);
+  const today = dayjs().format('YYYY-MM-DD');
+  const in60 = dayjs().add(60, 'day').format('YYYY-MM-DD');
 
-  // «Общая торговая» / свободная — только сдаваемая площадь (без технических, коридоров и т.п.)
+  const [roomsWithFloor, registerRows, expensesByMonth, expiring, debtors] = await Promise.all([
+    db('rooms as r')
+      .leftJoin('buildings as b', 'b.id', 'r.building_id')
+      .leftJoin('floors as f', 'f.id', 'r.floor_id')
+      .where('r.property_id', propertyId)
+      .whereNull('r.deleted_at')
+      .select(
+        'r.id',
+        'r.room_number',
+        'r.name',
+        'r.area',
+        'r.rentable_area',
+        'r.status',
+        'r.room_type',
+        'r.building_id',
+        'r.floor_id',
+        'b.name as building_name',
+        'f.name as floor_name',
+        'f.level_number',
+        'f.id as floor_pk'
+      ),
+    listRentRegister(propertyId, year),
+    db('expenses')
+      .where({ property_id: propertyId, period_year: year })
+      .groupBy('period_month')
+      .sum('amount as total')
+      .select('period_month'),
+    db('contracts')
+      .where({ property_id: propertyId, status: 'active' })
+      .where('end_date', '<=', in60)
+      .where('end_date', '>=', today)
+      .limit(10),
+    organizationId
+      ? db('tenants').where({ organization_id: organizationId, status: 'debtor' }).limit(10)
+      : Promise.resolve([]),
+  ]);
+
+  const rooms = roomsWithFloor;
   const totalArea = sumRentableArea(rooms);
   const occupiedArea = sumRentableArea(rooms, (r) => isOccupiedForArea(r.status));
   const freeArea = Math.max(0, totalArea - occupiedArea);
   const freeRentableArea = freeArea;
   const occupancy = totalArea > 0 ? Math.round((occupiedArea / totalArea) * 1000) / 10 : 0;
 
-  const minsk = nowInMinsk();
-  const year = minsk.year;
-  const rentPeriodMonth = maxDueRentMonth(year);
-
-  const registerRows = await listRentRegister(propertyId, year);
   const charged =
     rentPeriodMonth > 0
       ? registerRows.reduce(
@@ -132,7 +166,6 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
   const { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth } =
     await buildRentDebtAndUtilities(propertyId, year, registerRows);
 
-  // Графики только по договорам реестра (не «осиротевшие» начисления)
   const revenueByMonth = [];
   const paymentsByMonth = [];
   for (let m = 1; m <= 12; m++) {
@@ -146,69 +179,38 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     if (rentPaid) paymentsByMonth.push({ period_month: m, total: roundMoney(rentPaid) });
   }
 
-  const expensesByMonth = await db('expenses')
-    .where({ property_id: propertyId, period_year: year })
-    .groupBy('period_month')
-    .sum('amount as total')
-    .select('period_month');
+  const statusCounts = {};
+  for (const r of rooms) {
+    const st = r.status || 'unknown';
+    statusCounts[st] = (statusCounts[st] || 0) + 1;
+  }
+  const roomsByStatus = Object.entries(statusCounts).map(([status, count]) => ({
+    status,
+    count,
+  }));
 
-  const roomsByStatus = await db('rooms')
-    .where({ property_id: propertyId })
-    .whereNull('deleted_at')
-    .select('status')
-    .count('id as count')
-    .groupBy('status');
-
-  const expiring = await db('contracts')
-    .where({ property_id: propertyId, status: 'active' })
-    .where('end_date', '<=', dayjs().add(60, 'day').format('YYYY-MM-DD'))
-    .where('end_date', '>=', dayjs().format('YYYY-MM-DD'))
-    .limit(10);
-
-  const debtors = organizationId
-    ? await db('tenants').where({ organization_id: organizationId, status: 'debtor' }).limit(10)
-    : [];
-
-  const freeRooms = await db('rooms as r')
-    .join('buildings as b', 'b.id', 'r.building_id')
-    .join('floors as f', 'f.id', 'r.floor_id')
-    .where('r.property_id', propertyId)
-    .whereNull('r.deleted_at')
-    .whereIn('r.status', ['free', 'ready_for_rent'])
-    .select(
-      'r.id',
-      'r.room_number',
-      'r.name',
-      'r.area',
-      'r.status',
-      'r.room_type',
-      'b.name as building_name',
-      'f.name as floor_name',
-      'f.level_number'
-    )
-    .orderBy('r.room_number', 'asc')
-    .limit(10);
-
-  const occupancyByFloorRows = await db('rooms as r')
-    .join('floors as f', 'f.id', 'r.floor_id')
-    .where('r.property_id', propertyId)
-    .whereNull('r.deleted_at')
-    .select(
-      'f.id as floor_id',
-      'f.name',
-      'f.level_number',
-      'r.area',
-      'r.rentable_area',
-      'r.status',
-      'r.room_type'
-    );
+  const freeRooms = rooms
+    .filter((r) => ['free', 'ready_for_rent'].includes(r.status))
+    .sort((a, b) => String(a.room_number).localeCompare(String(b.room_number), 'ru'))
+    .slice(0, 10)
+    .map((r) => ({
+      id: r.id,
+      room_number: r.room_number,
+      name: r.name,
+      area: r.area,
+      status: r.status,
+      room_type: r.room_type,
+      building_name: r.building_name,
+      floor_name: r.floor_name,
+      level_number: r.level_number,
+    }));
 
   const floorMap = new Map();
-  for (const row of occupancyByFloorRows) {
-    const key = row.floor_id;
+  for (const row of rooms) {
+    const key = row.floor_pk || row.floor_id || `f-${row.floor_name}`;
     if (!floorMap.has(key)) {
       floorMap.set(key, {
-        name: row.name,
+        name: row.floor_name,
         level_number: row.level_number,
         total: 0,
         occupied_count: 0,
@@ -218,10 +220,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     }
     const bucket = floorMap.get(key);
     const sqm = roomRentableArea(row);
-    if (sqm <= 0 && !isOccupiedForArea(row.status)) {
-      // техническое / не сдаётся — не в торговую площадь и не в счётчик сдаваемых
-      continue;
-    }
+    if (sqm <= 0 && !isOccupiedForArea(row.status)) continue;
     bucket.total += 1;
     bucket.total_area += sqm;
     if (isOccupiedForArea(row.status)) {
