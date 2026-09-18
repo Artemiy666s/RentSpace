@@ -128,6 +128,8 @@ router.get(
       .select('p.*', 't.name as tenant_name');
     if (req.user.role !== 'super_admin') q = q.where('p.organization_id', req.user.organizationId);
     if (req.query.propertyId) q = q.where('p.property_id', req.query.propertyId);
+    if (req.query.contractId) q = q.where('p.contract_id', req.query.contractId);
+    if (req.query.tenantId) q = q.where('p.tenant_id', req.query.tenantId);
     if (req.query.year) q = q.where('p.period_year', req.query.year);
     if (req.query.month) q = q.where('p.period_month', req.query.month);
     ok(res, await q.orderBy('p.payment_date', 'desc'));

@@ -514,7 +514,9 @@ async function listPaymentsTable(query, orgId) {
     .join('properties as p', 'p.id', 'pay.property_id')
     .where({ 'pay.period_year': year, 'pay.period_month': month })
     .select('pay.*', 't.name as tenant_name', 'c.contract_number', 'p.name as property_name');
-  if (query.propertyId) q = q.where('pay.property_id', query.propertyId);
+    if (query.propertyId) q = q.where('pay.property_id', query.propertyId);
+  if (query.contractId) q = q.where('pay.contract_id', query.contractId);
+  if (query.tenantId) q = q.where('pay.tenant_id', query.tenantId);
   if (orgId) q = q.where('p.organization_id', orgId);
   if (query.search) {
     const s = `%${query.search}%`;
