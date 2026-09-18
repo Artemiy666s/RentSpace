@@ -258,11 +258,14 @@ async function rentOutRoom({
   });
 
   // Начисления за все уже наступившие месяцы (аренда — после 15-го числа месяца)
+  // Начисления только по этому договору/помещению за уже наступившие месяцы
   await ensureDueRentCharges({
     organizationId,
     propertyId,
     fromDate: startDate,
     userId,
+    contractId,
+    roomId,
   });
   invalidateRentRegisterCache(propertyId);
 
@@ -289,19 +292,23 @@ async function vacateRoom({
     .where('c.status', 'active')
     .select('cr.id', 'cr.start_date', 'cr.comment', 'c.id as contract_id', 'c.comment as contract_comment');
 
-  // До закрытия договора — начислить все уже наступившие месяцы (иначе generate не возьмёт completed)
+  // До закрытия — начислить только по этому помещению за наступившие месяцы
   if (links.length && organizationId && propertyId) {
     const fromDate =
       links
         .map((l) => l.start_date)
         .filter(Boolean)
         .sort()[0] || endDate;
-    await ensureDueRentCharges({
-      organizationId,
-      propertyId,
-      fromDate,
-      userId,
-    }).catch(() => {});
+    for (const link of links) {
+      await ensureDueRentCharges({
+        organizationId,
+        propertyId,
+        fromDate,
+        userId,
+        contractId: link.contract_id,
+        roomId,
+      }).catch(() => {});
+    }
   }
 
   for (const link of links) {

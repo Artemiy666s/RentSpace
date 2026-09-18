@@ -11,8 +11,9 @@ function roundMoney(value) {
 
 /**
  * Задолженность по аренде + коммунальные.
- * Оплаты за год закрывают начисления с января (FIFO): так совпадает с реестром,
- * когда платёж не всегда проставлен в тот же period_month.
+ * Итог долга = как в реестре (начислено due − оплаты за год).
+ * Разбивка по месяцам — с конца года: остаток долга вешаем на свежие месяцы,
+ * чтобы уже закрытые (апр/май) не всплывали из‑за рассинхрона period_month у платежей.
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows = registerRowsPreloaded || (await listRentRegister(propertyId, year));
@@ -22,27 +23,21 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   const debtBreakdown = [];
 
   for (const row of registerRows) {
-    let yearPaid = 0;
-    for (let m = 1; m <= 12; m++) {
-      yearPaid += Number(row.months?.[m]?.paid || 0);
-    }
-    let paidLeft = roundMoney(yearPaid);
+    const registerDebt = roundMoney(row.debt || 0);
+    if (registerDebt <= 0.005) continue;
 
+    let remaining = registerDebt;
     const months = [];
-    for (let m = 1; m <= dueThrough; m++) {
+    for (let m = dueThrough; m >= 1 && remaining > 0.005; m -= 1) {
       const charged = Number(row.months?.[m]?.rent || 0);
-      if (charged <= 0 && paidLeft <= 0) continue;
-      const applied = Math.min(charged, paidLeft);
-      paidLeft = roundMoney(paidLeft - applied);
-      const debt = Math.max(0, roundMoney(charged - applied));
+      if (charged <= 0) continue;
+      const slice = Math.min(charged, remaining);
+      const debt = roundMoney(slice);
       if (debt <= 0.005) continue;
       months.push({ month: m, debt });
       monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
+      remaining = roundMoney(remaining - debt);
     }
-
-    // Итог по договору — как колонка «Задолженность» в реестре
-    const registerDebt = roundMoney(row.debt || 0);
-    if (registerDebt <= 0.005) continue;
 
     debtBreakdown.push({
       contractId: row.contractId,

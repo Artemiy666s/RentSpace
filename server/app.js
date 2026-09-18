@@ -8,11 +8,17 @@ const config = require('./config');
 const apiRoutes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const { ensurePerfIndexes } = require('./utils/ensurePerfIndexes');
+const { cleanupSep18AutoCharges } = require('./utils/cleanupAutoCharges');
 
 const app = express();
 
-// Фоном: индексы для быстрых реестра/дашборда/карты (не блокирует старт)
+// Фоном: индексы + снятие ошибочных автоначислений от 18.09
 void ensurePerfIndexes();
+void cleanupSep18AutoCharges()
+  .then((r) => {
+    if (r?.deleted) console.log(`[cleanup] removed ${r.deleted} auto rent_charges from 2026-09-18`);
+  })
+  .catch((e) => console.warn('[cleanup] auto charges:', e.message));
 
 // Ensure upload directories exist
 const uploadDirs = [
