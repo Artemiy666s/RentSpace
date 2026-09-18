@@ -1,6 +1,48 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { calcRentAmount } = require('../utils/rent');
+const { CHARGE_DAY, nowInMinsk } = require('../utils/billingPeriod');
+
+/** Последний месяц, за который аренда уже должна быть начислена (Europe/Minsk, после 15-го). */
+function lastDueRentYm(asOf = new Date()) {
+  const now = nowInMinsk(asOf);
+  let year = now.year;
+  let month = now.day >= CHARGE_DAY ? now.month : now.month - 1;
+  if (month <= 0) {
+    month = 12;
+    year -= 1;
+  }
+  return { year, month };
+}
+
+/**
+ * Создаёт отсутствующие начисления аренды по объекту за все месяцы
+ * от fromDate (или начала текущего года) до последнего «наступившего» месяца.
+ */
+async function ensureDueRentCharges({ organizationId, propertyId, fromDate, userId, asOf = new Date() }) {
+  const due = lastDueRentYm(asOf);
+  const start = dayjs(fromDate || `${due.year}-01-01`).startOf('month');
+  let y = start.year();
+  let m = start.month() + 1;
+  const created = [];
+
+  while (y < due.year || (y === due.year && m <= due.month)) {
+    const ids = await generateRentCharges({
+      organizationId,
+      propertyId,
+      year: y,
+      month: m,
+      userId,
+    });
+    created.push(...ids);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return created;
+}
 
 async function generateRentCharges({ organizationId, propertyId, year, month, userId }) {
   const periodStart = dayjs(`${year}-${month}-01`).format('YYYY-MM-DD');
@@ -68,4 +110,4 @@ async function generateRentCharges({ organizationId, propertyId, year, month, us
   return created;
 }
 
-module.exports = { generateRentCharges };
+module.exports = { generateRentCharges, ensureDueRentCharges, lastDueRentYm };

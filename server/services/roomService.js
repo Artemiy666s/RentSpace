@@ -3,6 +3,8 @@ const { db } = require('../db');
 const { logAudit, logActivity } = require('../utils/audit');
 const { recordRoomStatusChange } = require('../utils/roomStatusHistory');
 const { normalizeLegalTypeForDb } = require('../utils/legalType');
+const { ensureDueRentCharges } = require('./chargeService');
+const { nowInMinsk } = require('../utils/billingPeriod');
 
 async function getRoomDetails(roomId) {
   const room = await db('rooms').whereNull('deleted_at').where({ id: roomId }).first();
@@ -37,8 +39,19 @@ async function getRoomDetails(roomId) {
     .first()
     .catch(() => null);
 
-  const year = dayjs().year();
-  const month = dayjs().month() + 1;
+  const minsk = nowInMinsk();
+  const year = minsk.year;
+  const month = minsk.month;
+
+  // Подтянуть начисления за уже наступившие месяцы (после 15-го), если их ещё нет
+  if (activeLink) {
+    await ensureDueRentCharges({
+      organizationId: activeLink.organization_id,
+      propertyId: activeLink.property_id || room.property_id,
+      fromDate: activeLink.start_date,
+      userId: null,
+    }).catch(() => {});
+  }
 
   const charges = await db('rent_charges')
     .where({ room_id: roomId, period_year: year, period_month: month })
@@ -241,6 +254,14 @@ async function rentOutRoom({
     title: `Сдано помещение ${room.room_number}`,
     entityType: 'room',
     entityId: roomId,
+  });
+
+  // Начисления за все уже наступившие месяцы (аренда — после 15-го числа месяца)
+  await ensureDueRentCharges({
+    organizationId,
+    propertyId,
+    fromDate: startDate,
+    userId,
   });
 
   return { contractId, roomId, tenantId: resolvedTenantId };
