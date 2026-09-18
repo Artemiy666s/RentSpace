@@ -11,7 +11,7 @@ function roundMoney(value) {
 
 /**
  * Задолженность по аренде + коммунальные.
- * Цифры совпадают с реестром «Аренда по счетам» (те же договоры и правила 15-го числа).
+ * Месяцы: долг = начислено − оплачено за тот же месяц (как в реестре), без FIFO с января.
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows = registerRowsPreloaded || (await listRentRegister(propertyId, year));
@@ -21,24 +21,14 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   const debtBreakdown = [];
 
   for (const row of registerRows) {
-    let yearPaid = 0;
-    for (let m = 1; m <= 12; m++) {
-      yearPaid += Number(row.months?.[m]?.paid || 0);
-    }
-    let paidLeft = roundMoney(yearPaid);
-
-    let contractDebt = 0;
     const months = [];
     for (let m = 1; m <= dueThrough; m++) {
       const charged = Number(row.months?.[m]?.rent || 0);
-      if (!charged && paidLeft <= 0) continue;
-      const applied = Math.min(charged, paidLeft);
-      paidLeft = roundMoney(paidLeft - applied);
-      const debt = Math.max(0, charged - applied);
+      const paid = Number(row.months?.[m]?.paid || 0);
+      const debt = Math.max(0, roundMoney(charged - paid));
       if (debt <= 0.005) continue;
-      months.push({ month: m, debt: roundMoney(debt) });
-      contractDebt = roundMoney(contractDebt + debt);
-      monthTotals[m] = (monthTotals[m] || 0) + debt;
+      months.push({ month: m, debt });
+      monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
     }
 
     // Итог по договору — как колонка «Задолженность» в реестре
