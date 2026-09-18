@@ -2,6 +2,181 @@ const dayjs = require('dayjs');
 const { db } = require('../db');
 const { getMonthReadiness } = require('./monthCloseService');
 
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+/**
+ * Задолженность по аренде (без коммуналки) + отдельный блок коммунальных.
+ * debt / debtMonths / debtBreakdown — только rent_charges − payments(type=rent).
+ * utilities — utility_charges и payments(type=utilities).
+ */
+async function buildRentDebtAndUtilities(propertyId, year) {
+  const rentRows = await db('rent_charges')
+    .where({ property_id: propertyId, period_year: year })
+    .whereNot('status', 'cancelled')
+    .select('contract_id', 'period_month')
+    .sum('amount_with_vat as total')
+    .groupBy('contract_id', 'period_month');
+
+  const rentPayRows = await db('payments')
+    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+    .select('contract_id', 'period_month')
+    .sum('amount as total')
+    .groupBy('contract_id', 'period_month');
+
+  const utilRows = await db('utility_charges')
+    .where({ property_id: propertyId, period_year: year })
+    .select('period_month')
+    .sum('amount as total')
+    .groupBy('period_month');
+
+  const utilPayRows = await db('payments')
+    .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
+    .select('period_month')
+    .sum('amount as total')
+    .groupBy('period_month');
+
+  const rentCharged = {};
+  const rentPaid = {};
+  const contractIds = new Set();
+
+  for (const row of rentRows) {
+    const cid = Number(row.contract_id);
+    const m = Number(row.period_month);
+    if (!cid || !m) continue;
+    contractIds.add(cid);
+    const key = `${cid}-${m}`;
+    rentCharged[key] = Number(row.total || 0);
+  }
+  for (const row of rentPayRows) {
+    const cid = Number(row.contract_id);
+    const m = Number(row.period_month);
+    if (!cid || !m) continue;
+    contractIds.add(cid);
+    const key = `${cid}-${m}`;
+    rentPaid[key] = Number(row.total || 0);
+  }
+
+  const monthTotals = {};
+  const byContract = {};
+
+  for (const cid of contractIds) {
+    byContract[cid] = { debt: 0, months: [] };
+    for (let m = 1; m <= 12; m++) {
+      const key = `${cid}-${m}`;
+      const charged = rentCharged[key] || 0;
+      const paid = rentPaid[key] || 0;
+      if (!charged && !paid) continue;
+      const debt = Math.max(0, charged - paid);
+      if (debt <= 0.005) continue;
+      byContract[cid].months.push({ month: m, debt: roundMoney(debt) });
+      byContract[cid].debt = roundMoney(byContract[cid].debt + debt);
+      monthTotals[m] = (monthTotals[m] || 0) + debt;
+    }
+  }
+
+  const contracts = contractIds.size
+    ? await db('contracts as c')
+        .leftJoin('tenants as t', 't.id', 'c.tenant_id')
+        .whereIn('c.id', [...contractIds])
+        .select('c.id', 'c.contract_number', 't.name as tenant_name')
+    : [];
+  const contractMeta = Object.fromEntries(
+    contracts.map((c) => [
+      c.id,
+      {
+        tenantName: c.tenant_name || '—',
+        contractNumber: c.contract_number || String(c.id),
+      },
+    ])
+  );
+
+  const debtBreakdown = [...contractIds]
+    .map((cid) => {
+      const row = byContract[cid];
+      if (!row || row.debt <= 0.005) return null;
+      const meta = contractMeta[cid] || {};
+      return {
+        contractId: cid,
+        tenantName: meta.tenantName || '—',
+        contractNumber: meta.contractNumber || String(cid),
+        debt: row.debt,
+        months: row.months.sort((a, b) => b.month - a.month),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.debt - a.debt || a.tenantName.localeCompare(b.tenantName, 'ru'));
+
+  const debtMonths = Object.entries(monthTotals)
+    .map(([month, amount]) => ({
+      year,
+      month: Number(month),
+      amount: roundMoney(amount),
+    }))
+    .filter((row) => row.amount > 0.005)
+    .sort((a, b) => b.month - a.month);
+
+  const debt = roundMoney(debtMonths.reduce((s, row) => s + row.amount, 0));
+
+  const utilChargedMap = Object.fromEntries(utilRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
+  const utilPaidMap = Object.fromEntries(utilPayRows.map((r) => [Number(r.period_month), Number(r.total || 0)]));
+  const utilMonths = [];
+  for (let m = 1; m <= 12; m++) {
+    const charged = utilChargedMap[m] || 0;
+    const paid = utilPaidMap[m] || 0;
+    if (!charged && !paid) continue;
+    utilMonths.push({
+      year,
+      month: m,
+      charged: roundMoney(charged),
+      paid: roundMoney(paid),
+    });
+  }
+  utilMonths.sort((a, b) => b.month - a.month);
+
+  const utilities = {
+    charged: roundMoney(utilMonths.reduce((s, row) => s + row.charged, 0)),
+    paid: roundMoney(utilMonths.reduce((s, row) => s + row.paid, 0)),
+    months: utilMonths,
+  };
+
+  const prev = dayjs().subtract(1, 'month');
+  const prevYear = prev.year();
+  const prevMonth = prev.month() + 1;
+  let utilitiesPrevMonth = null;
+  if (prevYear === year) {
+    utilitiesPrevMonth = utilMonths.find((row) => row.month === prevMonth) || {
+      year: prevYear,
+      month: prevMonth,
+      charged: 0,
+      paid: 0,
+    };
+  } else {
+    const prevCharged = await db('utility_charges')
+      .where({ property_id: propertyId, period_year: prevYear, period_month: prevMonth })
+      .sum('amount as total')
+      .first();
+    const prevPaid = await db('payments')
+      .where({
+        property_id: propertyId,
+        period_year: prevYear,
+        period_month: prevMonth,
+        payment_type: 'utilities',
+      })
+      .sum('amount as total')
+      .first();
+    utilitiesPrevMonth = {
+      year: prevYear,
+      month: prevMonth,
+      charged: roundMoney(prevCharged?.total),
+      paid: roundMoney(prevPaid?.total),
+    };
+  }
+
+  return { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth };
+}
+
 /** KPI, графики и аналитика для дашборда директора */
 async function buildDirectorAnalytics(propertyId, organizationId) {
   const rooms = await db('rooms')
@@ -24,13 +199,15 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     .first();
 
   const paymentsMonth = await db('payments')
-    .where({ property_id: propertyId, period_year: year, period_month: month })
+    .where({ property_id: propertyId, period_year: year, period_month: month, payment_type: 'rent' })
     .sum('amount as total')
     .first();
 
   const charged = Number(rentMonth?.total || 0);
   const paid = Number(paymentsMonth?.total || 0);
-  const debt = Math.max(0, charged - paid);
+
+  const { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth } =
+    await buildRentDebtAndUtilities(propertyId, year);
 
   const revenueByMonth = await db('rent_charges')
     .where({ property_id: propertyId })
@@ -112,8 +289,12 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
       occupancy,
       rentMonth: charged,
       debt,
+      debtMonths,
       paidMonth: paid,
+      utilities,
+      utilitiesPrevMonth,
     },
+    debtBreakdown,
     revenueByMonth,
     paymentsByMonth,
     expensesByMonth,

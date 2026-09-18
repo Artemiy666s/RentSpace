@@ -207,27 +207,19 @@ async function computeContractsDebt(propertyId, year, contractIds) {
     .groupBy('contract_id')
     .sum('amount_with_vat as total')
     .select('contract_id');
-  const utilRows = await db('utility_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .whereIn('contract_id', contractIds)
-    .groupBy('contract_id')
-    .sum('amount as total')
-    .select('contract_id');
   const payRows = await db('payments')
-    .where({ property_id: propertyId, period_year: year })
+    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
     .whereIn('contract_id', contractIds)
     .groupBy('contract_id')
     .sum('amount as total')
     .select('contract_id');
 
   const rentMap = Object.fromEntries(rentRows.map((r) => [r.contract_id, Number(r.total)]));
-  const utilMap = Object.fromEntries(utilRows.map((r) => [r.contract_id, Number(r.total)]));
   const paidMap = Object.fromEntries(payRows.map((r) => [r.contract_id, Number(r.total)]));
 
   const debtMap = {};
   for (const id of contractIds) {
-    const charged = (rentMap[id] || 0) + (utilMap[id] || 0);
-    debtMap[id] = Math.max(0, charged - (paidMap[id] || 0));
+    debtMap[id] = Math.max(0, (rentMap[id] || 0) - (paidMap[id] || 0));
   }
   return debtMap;
 }
@@ -574,7 +566,7 @@ async function listRentRegister(propertyId, year, buildingId) {
   }
 
   const paymentsByContract = await db('payments')
-    .where({ property_id: propertyId, period_year: year })
+    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
     .groupBy('contract_id')
     .sum('amount as total')
     .select('contract_id');
@@ -596,7 +588,8 @@ async function listRentRegister(propertyId, year, buildingId) {
       totalUtil += months[m].utility;
     }
     const paid = paidMap[row.contract_id] || 0;
-    const debt = Math.max(0, totalRent + totalUtil - paid);
+    // Задолженность в реестре — только по аренде; коммуналка в отдельных колонках
+    const debt = Math.max(0, totalRent - paid);
     return {
       rowNum: idx + 1,
       contractId: row.contract_id,
