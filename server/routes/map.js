@@ -197,29 +197,54 @@ async function buildPropertyPlanPayload(plan, propertyId) {
   for (const r of rooms) {
     const bid = Number(r.building_id);
     if (!statsByBuilding[bid]) {
-      statsByBuilding[bid] = { totalArea: 0, rentedArea: 0, freeArea: 0 };
+      statsByBuilding[bid] = { totalArea: 0, rentedArea: 0, freeArea: 0, otherArea: 0 };
     }
     const area = Number(r.area) || 0;
     statsByBuilding[bid].totalArea += area;
     if (r.status === 'free') statsByBuilding[bid].freeArea += area;
-    if (['occupied', 'debt', 'reserved'].includes(r.status)) {
+    else if (['occupied', 'debt', 'reserved'].includes(r.status)) {
       statsByBuilding[bid].rentedArea += area;
+    } else {
+      statsByBuilding[bid].otherArea += area;
     }
   }
 
+  const floorCounts = await db('floors as f')
+    .join('buildings as b', 'b.id', 'f.building_id')
+    .where('b.property_id', propertyId)
+    .groupBy('f.building_id')
+    .select('f.building_id')
+    .count({ floorsCount: 'f.id' });
+  const floorsByBuilding = Object.fromEntries(
+    floorCounts.map((r) => [Number(r.building_id), Number(r.floorsCount) || 0])
+  );
+
   const buildings = shapes.map((s) => {
-    const stats = statsByBuilding[Number(s.building_id)] || {
+    const bid = Number(s.building_id);
+    const stats = statsByBuilding[bid] || {
       totalArea: 0,
       rentedArea: 0,
       freeArea: 0,
+      otherArea: 0,
     };
+    const total = stats.totalArea || 0;
+    const freePct = total > 0 ? (stats.freeArea / total) * 100 : 0;
+    const rentedPct = total > 0 ? (stats.rentedArea / total) * 100 : 0;
+    const otherPct = total > 0 ? (stats.otherArea / total) * 100 : 0;
+    const status = stats.freeArea >= stats.rentedArea ? 'free' : 'occupied';
     return {
-      id: Number(s.building_id),
+      id: bid,
       name: s.building_name,
       code: s.building_code,
       totalArea: stats.totalArea,
       rentedArea: stats.rentedArea,
       freeArea: stats.freeArea,
+      otherArea: stats.otherArea,
+      freePct,
+      rentedPct,
+      otherPct,
+      floorsCount: floorsByBuilding[bid] || 0,
+      fillColor: STATUS_COLORS[status] || STATUS_COLORS.free,
       shape: {
         id: s.id,
         shapeType: s.shape_type,
