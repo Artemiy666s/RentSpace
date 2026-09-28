@@ -5,7 +5,7 @@ const express = require('express');
 const { db } = require('../db');
 const { authenticate, requireRoles } = require('../middlewares/auth');
 const { requireOrgAccess } = require('../middlewares/orgAccess');
-const { floorPlanUpload } = require('../middlewares/upload');
+const { floorPlanUpload, propertyPlanUpload } = require('../middlewares/upload');
 const { STATUS_COLORS } = require('../utils/roomStatus');
 const { readImageDimensions } = require('../utils/imageDimensions');
 const config = require('../config');
@@ -45,6 +45,240 @@ function signPlanImageUrl(planId) {
     { expiresIn: '90d' }
   );
   return `/api/floor-plans/${planId}/image?sig=${encodeURIComponent(sig)}`;
+}
+
+function signPropertyPlanImageUrl(planId) {
+  const sig = jwt.sign(
+    { typ: 'property_plan_img', planId: Number(planId) },
+    config.jwt.secret,
+    { expiresIn: '90d' }
+  );
+  return `/api/property-plans/${planId}/image?sig=${encodeURIComponent(sig)}`;
+}
+
+const PROPERTY_PLAN_META_COLUMNS = [
+  'id',
+  'property_id',
+  'width',
+  'height',
+  'version',
+  'is_active',
+  'image_path',
+  'image_mime',
+  'original_file_name',
+  'created_at',
+  'updated_at',
+];
+
+let propertyPlanTablesReady = null;
+
+async function ensurePropertyPlanTables() {
+  if (propertyPlanTablesReady) return propertyPlanTablesReady;
+  propertyPlanTablesReady = (async () => {
+    const hasPlans = await db.schema.hasTable('property_plans');
+    if (!hasPlans) {
+      await db.schema.createTable('property_plans', (t) => {
+        t.bigIncrements('id').primary();
+        t.bigInteger('property_id').unsigned().notNullable();
+        t.string('image_path', 512).nullable();
+        t.string('original_file_name', 255).nullable();
+        t.string('image_mime', 64).nullable();
+        t.specificType('image_blob', 'LONGBLOB').nullable();
+        t.integer('width').unsigned().nullable();
+        t.integer('height').unsigned().nullable();
+        t.integer('version').unsigned().notNullable().defaultTo(1);
+        t.boolean('is_active').notNullable().defaultTo(true);
+        t.timestamp('created_at').defaultTo(db.fn.now());
+        t.timestamp('updated_at').defaultTo(db.fn.now());
+        t.index(['property_id', 'is_active'], 'idx_property_plans_active');
+      });
+    }
+    const hasShapes = await db.schema.hasTable('building_shapes');
+    if (!hasShapes) {
+      await db.schema.createTable('building_shapes', (t) => {
+        t.bigIncrements('id').primary();
+        t.bigInteger('building_id').unsigned().notNullable();
+        t.bigInteger('property_plan_id').unsigned().notNullable();
+        t.enum('shape_type', ['polygon', 'rect']).notNullable().defaultTo('polygon');
+        t.json('points_json').notNullable();
+        t.string('fill_color', 32).nullable();
+        t.string('stroke_color', 32).nullable();
+        t.integer('z_index').notNullable().defaultTo(1);
+        t.boolean('is_active').notNullable().defaultTo(true);
+        t.timestamp('created_at').defaultTo(db.fn.now());
+        t.timestamp('updated_at').defaultTo(db.fn.now());
+        t.index(['property_plan_id', 'is_active'], 'idx_building_shapes_plan_active');
+        t.index(['building_id', 'is_active'], 'idx_building_shapes_building_active');
+      });
+    }
+  })().catch((err) => {
+    propertyPlanTablesReady = null;
+    throw err;
+  });
+  return propertyPlanTablesReady;
+}
+
+function propertyPlanImageHref(plan) {
+  if (!plan) return null;
+  if (plan.image_mime || plan.image_blob) return signPropertyPlanImageUrl(plan.id);
+  return planImageUrl(plan);
+}
+
+function toPublicPropertyPlan(plan) {
+  if (!plan) return null;
+  const meta = {};
+  for (const key of PROPERTY_PLAN_META_COLUMNS) {
+    if (plan[key] !== undefined) meta[key] = plan[key];
+  }
+  return { ...meta, imageUrl: propertyPlanImageHref(meta) };
+}
+
+function verifyPropertyPlanImageSig(sig, planId) {
+  const payload = jwt.verify(String(sig), config.jwt.secret);
+  if (payload.typ !== 'property_plan_img' || Number(payload.planId) !== Number(planId)) {
+    throw new Error('invalid sig');
+  }
+}
+
+async function verifyPropertyPlanImageBearer(req, plan) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return false;
+  const token = header.slice(7);
+  const payload = jwt.verify(token, config.jwt.secret);
+  const user = await db('users').where({ id: payload.userId, status: 'active' }).first();
+  if (!user) return false;
+  const property = await db('properties').where({ id: plan.property_id }).first();
+  if (!property || property.organization_id !== user.organization_id) return false;
+  return true;
+}
+
+async function getActivePropertyPlan(propertyId) {
+  await ensurePropertyPlanTables();
+  return db('property_plans')
+    .where({ property_id: propertyId, is_active: true })
+    .orderBy('version', 'desc')
+    .select(PROPERTY_PLAN_META_COLUMNS)
+    .first();
+}
+
+async function buildPropertyPlanPayload(plan, propertyId) {
+  await ensurePropertyPlanTables();
+  const propertyBuildings = await db('buildings')
+    .where({ property_id: propertyId })
+    .orderBy('name')
+    .select('id', 'name', 'code');
+
+  if (!plan) {
+    return {
+      plan: null,
+      buildings: [],
+      propertyBuildings: propertyBuildings.map((b) => ({
+        id: b.id,
+        name: b.name,
+        code: b.code,
+        hasShape: false,
+      })),
+    };
+  }
+
+  const shapes = await db('building_shapes as bs')
+    .join('buildings as b', 'b.id', 'bs.building_id')
+    .where({ 'bs.property_plan_id': plan.id, 'bs.is_active': true })
+    .select('bs.*', 'b.name as building_name', 'b.code as building_code');
+
+  const shapedBuildingIds = new Set(shapes.map((s) => Number(s.building_id)));
+
+  const rooms = await db('rooms')
+    .where({ property_id: propertyId })
+    .whereNull('deleted_at')
+    .select('building_id', 'area', 'status');
+
+  const statsByBuilding = {};
+  for (const r of rooms) {
+    const bid = Number(r.building_id);
+    if (!statsByBuilding[bid]) {
+      statsByBuilding[bid] = { totalArea: 0, rentedArea: 0, freeArea: 0 };
+    }
+    const area = Number(r.area) || 0;
+    statsByBuilding[bid].totalArea += area;
+    if (r.status === 'free') statsByBuilding[bid].freeArea += area;
+    if (['occupied', 'debt', 'reserved'].includes(r.status)) {
+      statsByBuilding[bid].rentedArea += area;
+    }
+  }
+
+  const buildings = shapes.map((s) => {
+    const stats = statsByBuilding[Number(s.building_id)] || {
+      totalArea: 0,
+      rentedArea: 0,
+      freeArea: 0,
+    };
+    return {
+      id: Number(s.building_id),
+      name: s.building_name,
+      code: s.building_code,
+      totalArea: stats.totalArea,
+      rentedArea: stats.rentedArea,
+      freeArea: stats.freeArea,
+      shape: {
+        id: s.id,
+        shapeType: s.shape_type,
+        pointsJson: parsePointsJson(s.points_json),
+        zIndex: s.z_index,
+        fillColor: s.fill_color,
+        strokeColor: s.stroke_color,
+      },
+    };
+  });
+
+  return {
+    plan: toPublicPropertyPlan(plan),
+    buildings,
+    propertyBuildings: propertyBuildings.map((b) => ({
+      id: b.id,
+      name: b.name,
+      code: b.code,
+      hasShape: shapedBuildingIds.has(Number(b.id)),
+    })),
+  };
+}
+
+async function servePropertyPlanImage(req, res) {
+  await ensurePropertyPlanTables();
+  const planId = Number(req.params.propertyPlanId);
+  const plan = await db('property_plans').where({ id: planId, is_active: true }).first();
+  if (!plan) return fail(res, 'План не найден', 404);
+
+  const sig = req.query.sig;
+  if (sig) {
+    try {
+      verifyPropertyPlanImageSig(sig, planId);
+    } catch {
+      return fail(res, 'Недействительная ссылка на изображение', 401);
+    }
+  } else {
+    try {
+      const allowed = await verifyPropertyPlanImageBearer(req, plan);
+      if (!allowed) return fail(res, 'Требуется авторизация', 401);
+    } catch {
+      return fail(res, 'Требуется авторизация', 401);
+    }
+  }
+
+  if (plan.image_blob) {
+    const mime = plan.image_mime || 'image/png';
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.end(plan.image_blob);
+  }
+
+  if (!plan.image_path) return fail(res, 'Изображение плана отсутствует', 404);
+  const uploadRoot = path.isAbsolute(config.upload.dir)
+    ? config.upload.dir
+    : path.join(process.cwd(), config.upload.dir);
+  const abs = path.join(uploadRoot, plan.image_path);
+  if (!fs.existsSync(abs)) return fail(res, 'Файл плана не найден', 404);
+  return res.sendFile(abs);
 }
 
 function planImageHref(plan) {
@@ -200,6 +434,184 @@ async function serveFloorPlanImage(req, res) {
 }
 
 publicRouter.get('/floor-plans/:floorPlanId/image', asyncHandler(serveFloorPlanImage));
+publicRouter.get('/property-plans/:propertyPlanId/image', asyncHandler(servePropertyPlanImage));
+
+router.get(
+  '/properties/:propertyId/plan',
+  asyncHandler(async (req, res) => {
+    const propertyId = Number(req.params.propertyId);
+    const property = await db('properties').where({ id: propertyId }).first();
+    if (!property) return fail(res, 'Объект не найден', 404);
+    const plan = await getActivePropertyPlan(propertyId);
+    ok(res, await buildPropertyPlanPayload(plan, propertyId));
+  })
+);
+
+router.post(
+  '/properties/:propertyId/plan',
+  requireRoles(...MAP_EDIT_ROLES),
+  propertyPlanUpload.single('image'),
+  asyncHandler(async (req, res) => {
+    await ensurePropertyPlanTables();
+    const propertyId = Number(req.params.propertyId);
+    const property = await db('properties').where({ id: propertyId }).first();
+    if (!property) return fail(res, 'Объект не найден', 404);
+
+    let width = Number(req.body.width) || 1200;
+    let height = Number(req.body.height) || 800;
+
+    if (req.file?.path) {
+      const dim = readImageDimensions(req.file.path);
+      if (dim) {
+        width = dim.width;
+        height = dim.height;
+      }
+    }
+
+    const existing = await getActivePropertyPlan(propertyId);
+
+    if (existing) {
+      const upd = {
+        width,
+        height,
+        updated_at: db.fn.now(),
+      };
+      if (req.file) {
+        upd.image_path = path.join('property-plans', req.file.filename).replace(/\\/g, '/');
+        upd.original_file_name = req.file.originalname;
+        try {
+          upd.image_mime = req.file.mimetype || null;
+          upd.image_blob = fs.readFileSync(req.file.path);
+        } catch {
+          // ignore
+        }
+      } else {
+        return fail(res, 'Загрузите изображение плана', 400);
+      }
+      try {
+        await db('property_plans').where({ id: existing.id }).update(upd);
+      } catch (err) {
+        if (!hasMissingColumnError(err)) throw err;
+        const fallbackUpd = { ...upd };
+        delete fallbackUpd.image_blob;
+        delete fallbackUpd.image_mime;
+        await db('property_plans').where({ id: existing.id }).update(fallbackUpd);
+      }
+      const plan = await db('property_plans')
+        .where({ id: existing.id })
+        .select(PROPERTY_PLAN_META_COLUMNS)
+        .first();
+      return ok(res, toPublicPropertyPlan(plan));
+    }
+
+    const prevCount = await db('property_plans').where({ property_id: propertyId }).count('id as c').first();
+    const version = Number(prevCount?.c || 0) + 1;
+    const payload = {
+      property_id: propertyId,
+      width,
+      height,
+      version,
+      is_active: true,
+    };
+    if (!req.file) return fail(res, 'Загрузите изображение плана', 400);
+    payload.image_path = path.join('property-plans', req.file.filename).replace(/\\/g, '/');
+    payload.original_file_name = req.file.originalname;
+    try {
+      payload.image_mime = req.file.mimetype || null;
+      payload.image_blob = fs.readFileSync(req.file.path);
+    } catch {
+      // ignore
+    }
+
+    let id;
+    try {
+      [id] = await db('property_plans').insert(payload);
+    } catch (err) {
+      if (!hasMissingColumnError(err)) throw err;
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.image_blob;
+      delete fallbackPayload.image_mime;
+      [id] = await db('property_plans').insert(fallbackPayload);
+    }
+    const plan = await db('property_plans').where({ id }).select(PROPERTY_PLAN_META_COLUMNS).first();
+    ok(res, toPublicPropertyPlan(plan), 201);
+  })
+);
+
+router.post(
+  '/building-shapes',
+  requireRoles(...MAP_EDIT_ROLES),
+  asyncHandler(async (req, res) => {
+    await ensurePropertyPlanTables();
+    const { buildingId, propertyPlanId, shapeType, pointsJson, fillColor, strokeColor, zIndex } =
+      req.body;
+    if (!buildingId || !propertyPlanId || !pointsJson?.points?.length) {
+      return fail(res, 'Укажите здание, план и контур', 400);
+    }
+
+    const building = await db('buildings').where({ id: buildingId }).first();
+    const plan = await db('property_plans').where({ id: propertyPlanId, is_active: true }).first();
+    if (!building || !plan) return fail(res, 'Здание или план не найдены', 404);
+    if (Number(building.property_id) !== Number(plan.property_id)) {
+      return fail(res, 'Здание не относится к этому объекту', 400);
+    }
+
+    await db('building_shapes')
+      .where({ building_id: buildingId, is_active: true })
+      .update({ is_active: false, updated_at: db.fn.now() });
+
+    const maxZ = await db('building_shapes')
+      .where({ property_plan_id: propertyPlanId, is_active: true })
+      .max('z_index as z')
+      .first();
+
+    const [id] = await db('building_shapes').insert({
+      building_id: buildingId,
+      property_plan_id: propertyPlanId,
+      shape_type: shapeType || 'polygon',
+      points_json: JSON.stringify(pointsJson),
+      fill_color: fillColor || null,
+      stroke_color: strokeColor || null,
+      z_index: zIndex ?? (Number(maxZ?.z) || 0) + 1,
+      is_active: true,
+    });
+
+    ok(res, { id }, 201);
+  })
+);
+
+router.put(
+  '/building-shapes/:id',
+  requireRoles(...MAP_EDIT_ROLES),
+  asyncHandler(async (req, res) => {
+    await ensurePropertyPlanTables();
+    const shape = await db('building_shapes').where({ id: req.params.id, is_active: true }).first();
+    if (!shape) return fail(res, 'Контур не найден', 404);
+
+    const upd = { updated_at: db.fn.now() };
+    if (req.body.pointsJson) upd.points_json = JSON.stringify(req.body.pointsJson);
+    if (req.body.fillColor != null) upd.fill_color = req.body.fillColor;
+    if (req.body.strokeColor != null) upd.stroke_color = req.body.strokeColor;
+    if (req.body.zIndex != null) upd.z_index = req.body.zIndex;
+    if (req.body.shapeType) upd.shape_type = req.body.shapeType;
+
+    await db('building_shapes').where({ id: req.params.id }).update(upd);
+    ok(res, { id: Number(req.params.id) });
+  })
+);
+
+router.delete(
+  '/building-shapes/:id',
+  requireRoles(...MAP_EDIT_ROLES),
+  asyncHandler(async (req, res) => {
+    await ensurePropertyPlanTables();
+    await db('building_shapes').where({ id: req.params.id }).update({
+      is_active: false,
+      updated_at: db.fn.now(),
+    });
+    ok(res, { deleted: true });
+  })
+);
 
 router.get(
   '/floors/:floorId/plan',

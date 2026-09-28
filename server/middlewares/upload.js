@@ -43,6 +43,12 @@ const floorPlanUpload = multer({
   fileFilter: fileFilter(ALLOWED_IMG),
 });
 
+const propertyPlanUpload = multer({
+  storage: createStorage('property-plans'),
+  limits: { fileSize: maxSize },
+  fileFilter: fileFilter(ALLOWED_IMG),
+});
+
 const excelUpload = multer({
   storage: createStorage('imports'),
   limits: { fileSize: maxSize },
@@ -55,4 +61,4 @@ const fileUpload = multer({
   fileFilter: fileFilter([...ALLOWED_DOC, ...ALLOWED_IMG]),
 });
 
-module.exports = { floorPlanUpload, excelUpload, fileUpload };
+module.exports = { floorPlanUpload, propertyPlanUpload, excelUpload, fileUpload };
