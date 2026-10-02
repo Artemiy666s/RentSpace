@@ -279,6 +279,8 @@ export const be: TranslationTree = {
     chargesVsPayments: 'Пачатак і аплата',
     charged: 'Пачатак',
     paid: 'Аплачана',
+    rentPayments: 'Арендныя плацяжы',
+    utilities: 'Камунальныя плацяжы',
     expensesByMonth: 'Выдаткі па месяцах',
     occupancyByFloor: 'Запаўняемасць па паверхах',
     roomsByStatus: 'Памяшкання па статусах',

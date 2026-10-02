@@ -279,6 +279,8 @@ export const ru: TranslationTree = {
     chargesVsPayments: 'Начислено и оплачено',
     charged: 'Начислено',
     paid: 'Оплачено',
+    rentPayments: 'Арендные платежи',
+    utilities: 'Коммунальные платежи',
     expensesByMonth: 'Расходы по месяцам',
     occupancyByFloor: 'Заполняемость по этажам',
     roomsByStatus: 'Помещения по статусам',

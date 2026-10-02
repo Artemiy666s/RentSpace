@@ -279,6 +279,8 @@ export const en: TranslationTree = {
     chargesVsPayments: 'Charged vs paid',
     charged: 'Charged',
     paid: 'Paid',
+    rentPayments: 'Rent payments',
+    utilities: 'Utility payments',
     expensesByMonth: 'Monthly expenses',
     occupancyByFloor: 'Occupancy by floor',
     roomsByStatus: 'Units by status',
