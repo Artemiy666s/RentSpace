@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const express = require('express');
 const { db } = require('../db');
@@ -31,6 +32,11 @@ const PLAN_META_COLUMNS = [
   'updated_at',
 ];
 
+/** In-memory blob cache so warm instances don't re-fetch ~1MB PNG from TiDB every time. */
+const PLAN_BLOB_CACHE = new Map();
+const PLAN_BLOB_CACHE_MAX = 24;
+const PLAN_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
 router.use(authenticate, requireOrgAccess());
 
 function planImageUrl(plan) {
@@ -38,22 +44,57 @@ function planImageUrl(plan) {
   return `/uploads/${plan.image_path.replace(/^server\/uploads\/?/, '')}`;
 }
 
-function signPlanImageUrl(planId) {
-  const sig = jwt.sign(
-    { typ: 'floor_plan_img', planId: Number(planId) },
-    config.jwt.secret,
-    { expiresIn: '90d' }
-  );
-  return `/api/floor-plans/${planId}/image?sig=${encodeURIComponent(sig)}`;
+function hmacPlanSig(typ, planId, version) {
+  return crypto
+    .createHmac('sha256', config.jwt.secret)
+    .update(`${typ}:${Number(planId)}:${Number(version) || 1}`)
+    .digest('base64url');
 }
 
-function signPropertyPlanImageUrl(planId) {
-  const sig = jwt.sign(
-    { typ: 'property_plan_img', planId: Number(planId) },
-    config.jwt.secret,
-    { expiresIn: '90d' }
-  );
-  return `/api/property-plans/${planId}/image?sig=${encodeURIComponent(sig)}`;
+function verifyHmacPlanSig(typ, planId, version, sig) {
+  if (!sig) return false;
+  const expected = hmacPlanSig(typ, planId, version);
+  const a = Buffer.from(String(sig));
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** Stable signed URL (versioned) so browsers can cache plan images across reloads. */
+function signPlanImageUrl(planId, version = 1) {
+  const v = Number(version) || 1;
+  const sig = hmacPlanSig('floor_plan_img', planId, v);
+  return `/api/floor-plans/${planId}/image?v=${v}&sig=${encodeURIComponent(sig)}`;
+}
+
+function signPropertyPlanImageUrl(planId, version = 1) {
+  const v = Number(version) || 1;
+  const sig = hmacPlanSig('property_plan_img', planId, v);
+  return `/api/property-plans/${planId}/image?v=${v}&sig=${encodeURIComponent(sig)}`;
+}
+
+function planBlobCacheGet(kind, planId, version) {
+  const key = `${kind}:${planId}:${version}`;
+  const hit = PLAN_BLOB_CACHE.get(key);
+  if (!hit) return null;
+  PLAN_BLOB_CACHE.delete(key);
+  PLAN_BLOB_CACHE.set(key, hit);
+  return hit;
+}
+
+function planBlobCacheSet(kind, planId, version, mime, buf) {
+  const key = `${kind}:${planId}:${version}`;
+  if (PLAN_BLOB_CACHE.has(key)) PLAN_BLOB_CACHE.delete(key);
+  PLAN_BLOB_CACHE.set(key, { mime, buf });
+  while (PLAN_BLOB_CACHE.size > PLAN_BLOB_CACHE_MAX) {
+    const oldest = PLAN_BLOB_CACHE.keys().next().value;
+    PLAN_BLOB_CACHE.delete(oldest);
+  }
+}
+
+function sendPlanImage(res, mime, buf) {
+  res.setHeader('Content-Type', mime || 'image/png');
+  res.setHeader('Cache-Control', PLAN_IMAGE_CACHE_CONTROL);
+  return res.end(buf);
 }
 
 const PROPERTY_PLAN_META_COLUMNS = [
@@ -120,7 +161,9 @@ async function ensurePropertyPlanTables() {
 
 function propertyPlanImageHref(plan) {
   if (!plan) return null;
-  if (plan.image_mime || plan.image_blob) return signPropertyPlanImageUrl(plan.id);
+  if (plan.image_mime || plan.image_blob) {
+    return signPropertyPlanImageUrl(plan.id, plan.version);
+  }
   return planImageUrl(plan);
 }
 
@@ -163,12 +206,12 @@ async function getActivePropertyPlan(propertyId) {
 
 async function buildPropertyPlanPayload(plan, propertyId) {
   await ensurePropertyPlanTables();
-  const propertyBuildings = await db('buildings')
-    .where({ property_id: propertyId })
-    .orderBy('name')
-    .select('id', 'name', 'code');
 
   if (!plan) {
+    const propertyBuildings = await db('buildings')
+      .where({ property_id: propertyId })
+      .orderBy('name')
+      .select('id', 'name', 'code');
     return {
       plan: null,
       buildings: [],
@@ -181,17 +224,38 @@ async function buildPropertyPlanPayload(plan, propertyId) {
     };
   }
 
-  const shapes = await db('building_shapes as bs')
-    .join('buildings as b', 'b.id', 'bs.building_id')
-    .where({ 'bs.property_plan_id': plan.id, 'bs.is_active': true })
-    .select('bs.*', 'b.name as building_name', 'b.code as building_code');
+  const [propertyBuildings, shapes, rooms, floorCounts] = await Promise.all([
+    db('buildings')
+      .where({ property_id: propertyId })
+      .orderBy('name')
+      .select('id', 'name', 'code'),
+    db('building_shapes as bs')
+      .join('buildings as b', 'b.id', 'bs.building_id')
+      .where({ 'bs.property_plan_id': plan.id, 'bs.is_active': true })
+      .select(
+        'bs.id',
+        'bs.building_id',
+        'bs.shape_type',
+        'bs.points_json',
+        'bs.fill_color',
+        'bs.stroke_color',
+        'bs.z_index',
+        'b.name as building_name',
+        'b.code as building_code'
+      ),
+    db('rooms')
+      .where({ property_id: propertyId })
+      .whereNull('deleted_at')
+      .select('building_id', 'area', 'status'),
+    db('floors as f')
+      .join('buildings as b', 'b.id', 'f.building_id')
+      .where('b.property_id', propertyId)
+      .groupBy('f.building_id')
+      .select('f.building_id')
+      .count({ floorsCount: 'f.id' }),
+  ]);
 
   const shapedBuildingIds = new Set(shapes.map((s) => Number(s.building_id)));
-
-  const rooms = await db('rooms')
-    .where({ property_id: propertyId })
-    .whereNull('deleted_at')
-    .select('building_id', 'area', 'status');
 
   const statsByBuilding = {};
   for (const r of rooms) {
@@ -209,12 +273,6 @@ async function buildPropertyPlanPayload(plan, propertyId) {
     }
   }
 
-  const floorCounts = await db('floors as f')
-    .join('buildings as b', 'b.id', 'f.building_id')
-    .where('b.property_id', propertyId)
-    .groupBy('f.building_id')
-    .select('f.building_id')
-    .count({ floorsCount: 'f.id' });
   const floorsByBuilding = Object.fromEntries(
     floorCounts.map((r) => [Number(r.building_id), Number(r.floorsCount) || 0])
   );
@@ -269,17 +327,31 @@ async function buildPropertyPlanPayload(plan, propertyId) {
 }
 
 async function servePropertyPlanImage(req, res) {
-  await ensurePropertyPlanTables();
   const planId = Number(req.params.propertyPlanId);
-  const plan = await db('property_plans').where({ id: planId, is_active: true }).first();
+  const sig = req.query.sig;
+  const v = Number(req.query.v) || 0;
+
+  // Fast path: stable HMAC + memory cache — no DB round-trip for warm instances.
+  if (sig && v && verifyHmacPlanSig('property_plan_img', planId, v, sig)) {
+    const cached = planBlobCacheGet('pp', planId, v);
+    if (cached) return sendPlanImage(res, cached.mime, cached.buf);
+  }
+
+  await ensurePropertyPlanTables();
+  const plan = await db('property_plans')
+    .where({ id: planId, is_active: true })
+    .select('id', 'property_id', 'version', 'image_mime', 'image_path', 'image_blob')
+    .first();
   if (!plan) return fail(res, 'План не найден', 404);
 
-  const sig = req.query.sig;
   if (sig) {
-    try {
-      verifyPropertyPlanImageSig(sig, planId);
-    } catch {
-      return fail(res, 'Недействительная ссылка на изображение', 401);
+    const okHmac = verifyHmacPlanSig('property_plan_img', planId, plan.version, sig);
+    if (!okHmac) {
+      try {
+        verifyPropertyPlanImageSig(sig, planId);
+      } catch {
+        return fail(res, 'Недействительная ссылка на изображение', 401);
+      }
     }
   } else {
     try {
@@ -292,9 +364,8 @@ async function servePropertyPlanImage(req, res) {
 
   if (plan.image_blob) {
     const mime = plan.image_mime || 'image/png';
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.end(plan.image_blob);
+    planBlobCacheSet('pp', planId, plan.version || 1, mime, plan.image_blob);
+    return sendPlanImage(res, mime, plan.image_blob);
   }
 
   if (!plan.image_path) return fail(res, 'Изображение плана отсутствует', 404);
@@ -303,13 +374,14 @@ async function servePropertyPlanImage(req, res) {
     : path.join(process.cwd(), config.upload.dir);
   const abs = path.join(uploadRoot, plan.image_path);
   if (!fs.existsSync(abs)) return fail(res, 'Файл плана не найден', 404);
+  res.setHeader('Cache-Control', PLAN_IMAGE_CACHE_CONTROL);
   return res.sendFile(abs);
 }
 
 function planImageHref(plan) {
   if (!plan) return null;
   // Blob is stored in DB (Vercel-safe). Signed URL works in <img>/<svg> without Bearer header.
-  if (plan.image_mime) return signPlanImageUrl(plan.id);
+  if (plan.image_mime) return signPlanImageUrl(plan.id, plan.version);
   return planImageUrl(plan);
 }
 
@@ -421,15 +493,28 @@ async function buildPlanPayload(plan, floorId) {
 
 async function serveFloorPlanImage(req, res) {
   const planId = Number(req.params.floorPlanId);
-  const plan = await db('floor_plans').where({ id: planId, is_active: true }).first();
+  const sig = req.query.sig;
+  const v = Number(req.query.v) || 0;
+
+  if (sig && v && verifyHmacPlanSig('floor_plan_img', planId, v, sig)) {
+    const cached = planBlobCacheGet('fp', planId, v);
+    if (cached) return sendPlanImage(res, cached.mime, cached.buf);
+  }
+
+  const plan = await db('floor_plans')
+    .where({ id: planId, is_active: true })
+    .select('id', 'floor_id', 'version', 'image_mime', 'image_path', 'image_blob')
+    .first();
   if (!plan) return fail(res, 'План не найден', 404);
 
-  const sig = req.query.sig;
   if (sig) {
-    try {
-      verifyPlanImageSig(sig, planId);
-    } catch {
-      return fail(res, 'Недействительная ссылка на изображение', 401);
+    const okHmac = verifyHmacPlanSig('floor_plan_img', planId, plan.version, sig);
+    if (!okHmac) {
+      try {
+        verifyPlanImageSig(sig, planId);
+      } catch {
+        return fail(res, 'Недействительная ссылка на изображение', 401);
+      }
     }
   } else {
     try {
@@ -443,9 +528,8 @@ async function serveFloorPlanImage(req, res) {
   // Prefer DB blob (works on Vercel where uploads dir is ephemeral)
   if (plan.image_blob) {
     const mime = plan.image_mime || 'image/png';
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.end(plan.image_blob);
+    planBlobCacheSet('fp', planId, plan.version || 1, mime, plan.image_blob);
+    return sendPlanImage(res, mime, plan.image_blob);
   }
 
   // Fallback to file on disk (self-hosted / dev)
@@ -455,6 +539,7 @@ async function serveFloorPlanImage(req, res) {
     : path.join(process.cwd(), config.upload.dir);
   const abs = path.join(uploadRoot, plan.image_path);
   if (!fs.existsSync(abs)) return fail(res, 'Файл плана не найден', 404);
+  res.setHeader('Cache-Control', PLAN_IMAGE_CACHE_CONTROL);
   return res.sendFile(abs);
 }
 
