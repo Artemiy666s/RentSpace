@@ -7,6 +7,33 @@ const { ensureDueRentCharges, lastDueRentYm } = require('./chargeService');
 const { maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
 const { invalidateRentRegisterCache } = require('./managerDataService');
 
+function applyOpenContractRoomFilter(query, { asOf = dayjs().format('YYYY-MM-DD') } = {}) {
+  return query.where('c.status', 'active').whereNull('c.deleted_at').where(function () {
+    // Пустая строка в DATE недопустима в MySQL strict — нормализуем при записи в null.
+    this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+  });
+}
+
+/** Активная связь договор↔помещение (без арендатора) — для проверок сдачи/смены. */
+function activeContractRoomQuery(roomId) {
+  return applyOpenContractRoomFilter(
+    db('contract_rooms as cr')
+      .join('contracts as c', 'c.id', 'cr.contract_id')
+      .where('cr.room_id', roomId)
+  );
+}
+
+/** Активная аренда с данными арендатора — для карточки помещения. */
+function activeLeaseQuery(roomId) {
+  return applyOpenContractRoomFilter(
+    db('contract_rooms as cr')
+      .join('contracts as c', 'c.id', 'cr.contract_id')
+      .join('tenants as t', 't.id', 'c.tenant_id')
+      .where('cr.room_id', roomId)
+      .whereNull('t.deleted_at')
+  );
+}
+
 async function getRoomDetails(roomId) {
   const room = await db('rooms').whereNull('deleted_at').where({ id: roomId }).first();
   if (!room) return null;
@@ -27,14 +54,7 @@ async function getRoomDetails(roomId) {
     db('properties').where({ id: room.property_id }).first(),
     db('buildings').where({ id: room.building_id }).first(),
     db('floors').where({ id: room.floor_id }).first(),
-    db('contract_rooms as cr')
-      .join('contracts as c', 'c.id', 'cr.contract_id')
-      .join('tenants as t', 't.id', 'c.tenant_id')
-      .where('cr.room_id', roomId)
-      .where('c.status', 'active')
-      .where(function () {
-        this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
-      })
+    activeLeaseQuery(roomId)
       .select(
         'c.*',
         't.name as tenant_name',
@@ -196,8 +216,21 @@ async function rentOutRoom({
 }) {
   const room = await db('rooms').where({ id: roomId }).first();
   if (!room) throw Object.assign(new Error('Помещение не найдено'), { status: 404 });
-  if (!['free', 'negotiation', 'reserved', 'ready_for_rent'].includes(room.status)) {
-    throw Object.assign(new Error('Помещение недоступно для сдачи'), { status: 400 });
+
+  const rentableStatuses = ['free', 'negotiation', 'reserved', 'ready_for_rent'];
+  const orphanOccupied = ['occupied', 'debt'].includes(room.status);
+  if (!rentableStatuses.includes(room.status)) {
+    if (orphanOccupied) {
+      const existingLease = await activeContractRoomQuery(roomId).select('cr.id').first();
+      if (existingLease) {
+        throw Object.assign(new Error('Помещение уже сдано — используйте смену арендатора'), {
+          status: 400,
+        });
+      }
+      // Статус «сдано» без договора (часто после ручной смены статуса в редакторе карты)
+    } else {
+      throw Object.assign(new Error('Помещение недоступно для сдачи'), { status: 400 });
+    }
   }
 
   let resolvedTenantId = tenantId;
@@ -236,7 +269,7 @@ async function rentOutRoom({
     area: room.rentable_area || room.area,
     rate_without_vat: rateWithoutVat,
     start_date: startDate,
-    end_date: endDate,
+    end_date: endDate || null,
   });
 
   const oldStatus = room.status;
@@ -396,13 +429,7 @@ async function updateRoomLease({
   const room = await db('rooms').where({ id: roomId }).first();
   if (!room) throw Object.assign(new Error('Помещение не найдено'), { status: 404 });
 
-  const link = await db('contract_rooms as cr')
-    .join('contracts as c', 'c.id', 'cr.contract_id')
-    .where('cr.room_id', roomId)
-    .where('c.status', 'active')
-    .where(function () {
-      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
-    })
+  const link = await activeContractRoomQuery(roomId)
     .select('cr.*', 'c.id as contract_id', 'c.tenant_id')
     .first();
 
@@ -489,15 +516,7 @@ async function changeRoomTenant({
   const room = await db('rooms').where({ id: roomId }).first();
   if (!room) throw Object.assign(new Error('Помещение не найдено'), { status: 404 });
 
-  const activeLink = await db('contract_rooms as cr')
-    .join('contracts as c', 'c.id', 'cr.contract_id')
-    .where('cr.room_id', roomId)
-    .where('c.status', 'active')
-    .where(function () {
-      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
-    })
-    .select('cr.id')
-    .first();
+  const activeLink = await activeContractRoomQuery(roomId).select('cr.id').first();
 
   if (activeLink) {
     const end =

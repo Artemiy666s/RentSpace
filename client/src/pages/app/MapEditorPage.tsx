@@ -313,9 +313,11 @@ export function MapEditorPage() {
 
   const syncRoomMeta = useCallback(
     async (roomId: number) => {
+      const areaNum = Number(roomDraft.area) || 0;
       await api.put(`/rooms/${roomId}`, {
         name: roomDraft.name.trim() || roomDraft.roomNumber.trim(),
-        area: Number(roomDraft.area) || 0,
+        area: areaNum,
+        rentableArea: areaNum,
         roomType: normalizeRoomType(roomDraft.roomType),
         status: roomDraft.status,
       });
@@ -334,13 +336,15 @@ export function MapEditorPage() {
         if (!roomDraft.roomNumber.trim()) throw new Error(t('common.enterRoomNumber'));
         const duplicate = floorRooms.some((r) => r.roomNumber === roomDraft.roomNumber.trim());
         if (duplicate) throw new Error(t('mapEditor.roomExistsUseList'));
+        const areaNum = Number(roomDraft.area) || 0;
         const roomRes = await api.post('/rooms', {
           propertyId: pid,
           buildingId: bid,
           floorId: fid,
           roomNumber: roomDraft.roomNumber.trim(),
           name: roomDraft.name.trim() || roomDraft.roomNumber.trim(),
-          area: Number(roomDraft.area) || 0,
+          area: areaNum,
+          rentableArea: areaNum,
           roomType: normalizeRoomType(roomDraft.roomType),
           status: roomDraft.status,
         });
@@ -880,7 +884,9 @@ export function MapEditorPage() {
                       fullWidth
                       value={roomDraft.status}
                       onChange={(status) => setRoomDraft({ ...roomDraft, status })}
-                      options={ROOM_STATUS_ORDER.map((s) => ({
+                      options={ROOM_STATUS_ORDER.filter(
+                        (s) => !['occupied', 'debt'].includes(s)
+                      ).map((s) => ({
                         value: s,
                         label: statusLabels[s],
                       }))}

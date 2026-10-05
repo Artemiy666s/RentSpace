@@ -32,6 +32,8 @@ import { ChangeTenantModal } from '@/features/manager/ChangeTenantModal';
 
 import { Card } from '@/components/ui/Card';
 
+import { getApiErrorMessage } from '@/features/map-editor/apiError';
+
 import styles from './MapPage.module.css';
 
 
@@ -101,6 +103,8 @@ export function MapPage() {
   });
 
   const [payForm, setPayForm] = useState({ amount: '', paymentDate: '' });
+
+  const [rentError, setRentError] = useState<string | null>(null);
 
 
 
@@ -213,9 +217,15 @@ export function MapPage() {
     },
 
     onSuccess: () => {
+      setRentError(null);
       invalidateRoomQueries();
+      qc.invalidateQueries({ queryKey: ['dashboard-home'] });
       setRentModal(false);
       setRentModalMode('assign');
+    },
+
+    onError: (err) => {
+      setRentError(getApiErrorMessage(err, t('mapEditor.saveFailed')));
     },
 
   });
@@ -683,13 +693,19 @@ export function MapPage() {
         defaultRate={roomDetail?.rateWithoutVat ?? roomDetail?.current_rate_without_vat}
 
         onClose={() => {
+          setRentError(null);
           setRentModal(false);
           setRentModalMode('assign');
         }}
 
-        onSubmit={(payload) => rentMutation.mutate(payload)}
+        onSubmit={(payload) => {
+          setRentError(null);
+          rentMutation.mutate(payload);
+        }}
 
         loading={rentMutation.isPending}
+
+        error={rentError}
 
       />
 

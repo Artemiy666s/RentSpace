@@ -267,6 +267,8 @@ export function RoomDetailsPanel({
 
   const isOccupied = room.status === 'occupied' || room.status === 'debt';
 
+  const isOccupiedWithoutTenant = isOccupied && !room.tenant;
+
   const isNegotiation = room.status === 'negotiation';
 
 
@@ -455,7 +457,17 @@ export function RoomDetailsPanel({
 
             )}
 
-            {isOccupied && (
+            {isOccupiedWithoutTenant && (
+
+              <Button variant="primary" fullWidth onClick={onRentOut}>
+
+                <Key size={18} /> {t('mapPage.rentOutTitle')}
+
+              </Button>
+
+            )}
+
+            {isOccupied && !isOccupiedWithoutTenant && (
 
               <>
 

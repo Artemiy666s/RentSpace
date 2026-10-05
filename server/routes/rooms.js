@@ -130,8 +130,10 @@ router.put(
       const col = map[k] || k;
       if (allowed.includes(col)) upd[col] = v;
     }
+    const room = await db('rooms').where({ id: req.params.id }).whereNull('deleted_at').first();
+    if (!room) return fail(res, 'Помещение не найдено', 404);
+
     if (upd.room_number) {
-      const room = await db('rooms').where({ id: req.params.id }).first();
       const dup = await db('rooms')
         .where({
           floor_id: room.floor_id,
@@ -142,6 +144,20 @@ router.put(
         .first();
       if (dup) return fail(res, 'Помещение с таким номером уже есть на этаже', 409);
     }
+
+    // Редактор карты шлёт только area — без rentable_area KPI «общая торговая» не менялся.
+    if (upd.area != null && upd.rentable_area === undefined) {
+      const prevRentable = room.rentable_area;
+      const prevArea = room.area;
+      if (
+        prevRentable == null ||
+        prevRentable === '' ||
+        Number(prevRentable) === Number(prevArea)
+      ) {
+        upd.rentable_area = upd.area;
+      }
+    }
+
     upd.updated_at = db.fn.now();
     await db('rooms').where({ id: req.params.id }).update(upd);
     ok(res, await getRoomDetails(req.params.id));
@@ -233,23 +249,28 @@ router.post(
     const room = await db('rooms').where({ id: req.params.id }).first();
     if (!room) return fail(res, 'Помещение не найдено', 404);
     const orgId = req.user.organizationId || (await db('properties').where({ id: room.property_id }).first())?.organization_id;
-    const result = await rentOutRoom({
-      roomId: Number(req.params.id),
-      tenantId: req.body.tenantId,
-      tenantPayload: req.body.tenant,
-      contractNumber: req.body.contractNumber,
-      contractDate: req.body.contractDate,
-      startDate: req.body.startDate,
-      endDate: req.body.endDate,
-      rateWithoutVat: req.body.rateWithoutVat,
-      vatRate: req.body.vatRate,
-      paymentDay: req.body.paymentDay,
-      organizationId: orgId,
-      propertyId: room.property_id,
-      userId: req.user.id,
-      ip: req.ip,
-    });
-    ok(res, { ...result, room: await getRoomDetails(req.params.id) });
+    try {
+      const result = await rentOutRoom({
+        roomId: Number(req.params.id),
+        tenantId: req.body.tenantId,
+        tenantPayload: req.body.tenant,
+        contractNumber: req.body.contractNumber,
+        contractDate: req.body.contractDate,
+        startDate: req.body.startDate,
+        endDate: req.body.endDate || null,
+        rateWithoutVat: req.body.rateWithoutVat,
+        vatRate: req.body.vatRate,
+        paymentDay: req.body.paymentDay,
+        organizationId: orgId,
+        propertyId: room.property_id,
+        userId: req.user.id,
+        ip: req.ip,
+      });
+      ok(res, { ...result, room: await getRoomDetails(req.params.id) });
+    } catch (e) {
+      if (e.status) return fail(res, e.message, e.status);
+      throw e;
+    }
   })
 );
 

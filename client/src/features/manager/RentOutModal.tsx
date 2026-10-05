@@ -78,6 +78,8 @@ interface Props {
 
   loading?: boolean;
 
+  error?: string | null;
+
 }
 
 
@@ -92,7 +94,7 @@ const LEGAL_TYPE_CODES = [
 
 
 
-export function RentOutModal({ open, roomId, defaultRate, mode: rentMode = 'assign', onClose, onSubmit, loading }: Props) {
+export function RentOutModal({ open, roomId, defaultRate, mode: rentMode = 'assign', onClose, onSubmit, loading, error }: Props) {
 
   const { t } = useI18n();
 
@@ -327,6 +329,8 @@ export function RentOutModal({ open, roomId, defaultRate, mode: rentMode = 'assi
       <Input label={t('common.paymentDay')} type="number" min={1} max={28} value={paymentDay} onChange={(e) => setPaymentDay(e.target.value)} />
 
       <Input label={t('common.comment')} value={comment} onChange={(e) => setComment(e.target.value)} />
+
+      {error ? <p className={styles.error}>{error}</p> : null}
 
       <Button variant="primary" fullWidth onClick={handleSubmit} disabled={loading || !roomId}>
 
