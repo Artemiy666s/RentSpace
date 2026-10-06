@@ -99,6 +99,12 @@ router.post(
     if (body.tenantLike) {
       q = q.where('t.name', 'like', `%${body.tenantLike}%`);
     }
+    if (body.buildingId) {
+      q = q.where('r.building_id', Number(body.buildingId));
+    }
+    if (body.buildingLike) {
+      q = q.where('b.name', 'like', `%${body.buildingLike}%`);
+    }
 
     const rows = await q;
 
