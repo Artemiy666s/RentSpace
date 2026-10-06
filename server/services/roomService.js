@@ -106,9 +106,10 @@ async function getRoomDetails(roomId) {
     activeLink
       ? db('payments')
           .where({
-            tenant_id: activeLink.tenant_id,
+            contract_id: activeLink.id,
             period_year: rentYear,
             period_month: rentMonth,
+            payment_type: 'rent',
           })
           .sum('amount as total')
           .first()
@@ -159,6 +160,27 @@ async function changeRoomStatus({
   if (!room) throw Object.assign(new Error('Помещение не найдено'), { status: 404 });
 
   const oldStatus = room.status;
+
+  if (['occupied', 'debt'].includes(status)) {
+    const lease = await activeContractRoomQuery(roomId).select('cr.id').first();
+    if (!lease) {
+      throw Object.assign(
+        new Error('Нельзя поставить «сдано» без договора — оформите сдачу в аренду'),
+        { status: 400 }
+      );
+    }
+  }
+
+  if (['free', 'ready_for_rent'].includes(status)) {
+    const lease = await activeContractRoomQuery(roomId).select('cr.id').first();
+    if (lease) {
+      throw Object.assign(
+        new Error('Помещение сдано — сначала освободите его'),
+        { status: 400 }
+      );
+    }
+  }
+
   await db('rooms').where({ id: roomId }).update({
     status,
     comment: comment ?? room.comment,
@@ -198,6 +220,7 @@ async function changeRoomStatus({
     entityId: roomId,
   });
 
+  invalidateRentRegisterCache(propertyId);
   return getRoomDetails(roomId);
 }
 
@@ -348,7 +371,8 @@ async function vacateRoom({
   const links = await db('contract_rooms as cr')
     .join('contracts as c', 'c.id', 'cr.contract_id')
     .where('cr.room_id', roomId)
-    .where('c.status', 'active')
+    .whereIn('c.status', ['active', 'expiring'])
+    .whereNull('c.deleted_at')
     .select('cr.id', 'cr.start_date', 'cr.comment', 'c.id as contract_id', 'c.comment as contract_comment');
 
   // До закрытия — начислить только по этому помещению за наступившие месяцы
@@ -372,12 +396,22 @@ async function vacateRoom({
 
   for (const link of links) {
     await db('contract_rooms').where({ id: link.id }).update({ end_date: endDate });
-    await db('contracts').where({ id: link.contract_id }).update({
-      status: reason === 'debt' ? 'terminated' : 'completed',
-      actual_end_date: endDate,
-      comment: comment || reason || link.contract_comment || link.comment,
-      updated_at: db.fn.now(),
-    });
+    const stillOpen = await applyOpenContractRoomFilter(
+      db('contract_rooms as cr')
+        .join('contracts as c', 'c.id', 'cr.contract_id')
+        .where('c.id', link.contract_id)
+        .whereNot('cr.id', link.id)
+    )
+      .select('cr.id')
+      .first();
+    if (!stillOpen) {
+      await db('contracts').where({ id: link.contract_id }).update({
+        status: reason === 'debt' ? 'terminated' : 'completed',
+        actual_end_date: endDate,
+        comment: comment || reason || link.contract_comment || link.comment,
+        updated_at: db.fn.now(),
+      });
+    }
   }
 
   const targetStatus = newStatus || 'free';
@@ -417,6 +451,7 @@ async function vacateRoom({
     entityType: 'room',
     entityId: roomId,
   });
+  invalidateRentRegisterCache(propertyId);
 }
 
 async function updateRoomLease({
@@ -496,6 +531,7 @@ async function updateRoomLease({
     entityId: roomId,
   });
 
+  invalidateRentRegisterCache(propertyId);
   return getRoomDetails(roomId);
 }
 

@@ -20,6 +20,13 @@
   flex: 1;
 }
 
+.error {
+  margin: 0;
+  width: 100%;
+  color: #b42318;
+  font-size: 14px;
+}
+
 .selectors {
   display: flex;
   gap: 8px;

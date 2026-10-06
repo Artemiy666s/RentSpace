@@ -84,7 +84,9 @@ async function generateRentCharges({
     .join('rooms as r', 'r.id', 'cr.room_id')
     .where('c.organization_id', organizationId)
     .where('c.property_id', propertyId)
-    .where('c.status', 'active')
+    .whereIn('c.status', ['active', 'expiring'])
+    .whereNull('c.deleted_at')
+    .whereNull('c.deleted_at')
     .where('cr.start_date', '<=', periodEnd)
     .where(function () {
       this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', periodStart);

@@ -36,6 +36,28 @@ import { getApiErrorMessage } from '@/features/map-editor/apiError';
 
 import styles from './MapPage.module.css';
 
+function lastDueRentYm() {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Minsk',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  const parts: Record<string, number> = {};
+  for (const p of fmt.formatToParts(new Date())) {
+    if (p.type !== 'literal') parts[p.type] = Number(p.value);
+  }
+  let { year, month, day } = parts;
+  if (day < 15) {
+    month -= 1;
+    if (month < 1) {
+      month = 12;
+      year -= 1;
+    }
+  }
+  return { year, month };
+}
+
 
 
 export function MapPage() {
@@ -250,8 +272,16 @@ export function MapPage() {
 
       qc.invalidateQueries({ queryKey: ['room', selectedId] });
 
+      qc.invalidateQueries({ queryKey: ['dashboard-home'] });
+
+      qc.invalidateQueries({ queryKey: ['manager-rooms-table'] });
+
       setStatusModal(false);
 
+    },
+
+    onError: (err) => {
+      setRentError(getApiErrorMessage(err, t('mapEditor.saveFailed')));
     },
 
   });
@@ -330,8 +360,16 @@ export function MapPage() {
 
       qc.invalidateQueries({ queryKey: ['room', selectedId] });
 
+      qc.invalidateQueries({ queryKey: ['dashboard-home'] });
+
+      qc.invalidateQueries({ queryKey: ['manager-rooms-table'] });
+
       setVacateModal(false);
 
+    },
+
+    onError: (err) => {
+      setRentError(getApiErrorMessage(err, t('mapEditor.saveFailed')));
     },
 
   });
@@ -340,9 +378,9 @@ export function MapPage() {
 
   const payMutation = useMutation({
 
-    mutationFn: () =>
-
-      api.post('/payments', {
+    mutationFn: () => {
+      const due = lastDueRentYm();
+      return api.post('/payments', {
 
         propertyId: pid,
 
@@ -356,18 +394,25 @@ export function MapPage() {
 
         paymentType: 'rent',
 
-        periodYear: new Date().getFullYear(),
+        periodYear: due.year,
 
-        periodMonth: new Date().getMonth() + 1,
+        periodMonth: due.month,
 
-      }),
+      });
+    },
 
     onSuccess: () => {
 
       qc.invalidateQueries({ queryKey: ['room', selectedId] });
+      qc.invalidateQueries({ queryKey: ['dashboard-home'] });
+      qc.invalidateQueries({ queryKey: ['manager-rooms-table'] });
 
       setPaymentModal(false);
 
+    },
+
+    onError: (err) => {
+      setRentError(getApiErrorMessage(err, t('mapEditor.saveFailed')));
     },
 
   });
@@ -453,6 +498,7 @@ export function MapPage() {
       <header className={styles.toolbar}>
 
         <h1>{t('mapPage.title')}</h1>
+        {rentError && !rentModal ? <p className={styles.error}>{rentError}</p> : null}
 
         <div className={styles.selectors}>
           <Select

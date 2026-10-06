@@ -197,8 +197,11 @@ export function RoomsPage() {
     setChangeTenantName(row.tenant_name);
   };
 
-  const canRentOut = (s: string) => ['free', 'ready_for_rent', 'negotiation', 'reserved'].includes(s);
-  const canChangeTenant = (s: string) => ['occupied', 'debt'].includes(s);
+  const canRentOut = (s: string, tenantName?: string) =>
+    ['free', 'ready_for_rent', 'negotiation', 'reserved'].includes(s) ||
+    (['occupied', 'debt'].includes(s) && !tenantName);
+  const canChangeTenant = (s: string, tenantName?: string) =>
+    ['occupied', 'debt'].includes(s) && Boolean(tenantName);
 
   const detailTitle = selectedRow
     ? selectedRow.name
@@ -333,7 +336,7 @@ export function RoomsPage() {
                       {formatRateWithVat(row, t('common.dash')) ?? t('common.dash')}
                     </td>
                     <td className={styles.actionsCol} onClick={(e) => e.stopPropagation()}>
-                      {canRentOut(row.status) && (
+                      {canRentOut(row.status, row.tenant_name) && (
                         <button
                           type="button"
                           className={styles.iconBtn}
@@ -343,7 +346,7 @@ export function RoomsPage() {
                           <Key size={16} />
                         </button>
                       )}
-                      {canChangeTenant(row.status) && (
+                      {canChangeTenant(row.status, row.tenant_name) && (
                         <button
                           type="button"
                           className={styles.iconBtn}
@@ -400,12 +403,12 @@ export function RoomsPage() {
                         <Map size={16} /> {t('common.openOnMap')}
                       </Button>
                     </Link>
-                    {canRentOut(selectedRow.status) && (
+                    {canRentOut(selectedRow.status, selectedRow.tenant_name) && (
                       <Button variant="primary" onClick={() => openRentOut(selectedRow)}>
                         <Key size={16} /> {t('rooms.rentOutAction')}
                       </Button>
                     )}
-                    {canChangeTenant(selectedRow.status) && (
+                    {canChangeTenant(selectedRow.status, selectedRow.tenant_name) && (
                       <Button variant="secondary" onClick={() => openChangeTenant(selectedRow)}>
                         <UserRoundPen size={16} /> {t('rooms.changeTenant')}
                       </Button>

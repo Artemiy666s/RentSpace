@@ -192,7 +192,7 @@ export function RoomEditModal({ roomId, onClose, onSaved, onRentOut, onChangeTen
               fullWidth
               value={status}
               onChange={setStatus}
-              options={ROOM_STATUS_ORDER.map((k) => ({
+              options={ROOM_STATUS_ORDER.filter((k) => hasLease || !['occupied', 'debt'].includes(k)).map((k) => ({
                 value: k,
                 label: statusLabels[k],
               }))}

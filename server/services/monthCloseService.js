@@ -14,7 +14,8 @@ async function checkMonth(propertyId, year, month) {
     const links = await db('contract_rooms as cr')
       .join('contracts as c', 'c.id', 'cr.contract_id')
       .whereIn('cr.room_id', occupiedIds)
-      .where('c.status', 'active')
+      .whereIn('c.status', ['active', 'expiring'])
+      .whereNull('c.deleted_at')
       .select(
         'cr.room_id',
         'cr.rate_without_vat',
@@ -86,7 +87,7 @@ async function checkMonth(propertyId, year, month) {
   const overdue = await db('contracts as c')
     .join('tenants as t', 't.id', 'c.tenant_id')
     .where('c.property_id', propertyId)
-    .where('c.status', 'active')
+    .whereIn('c.status', ['active', 'expiring'])
     .where('c.payment_day', '<', dayjs().date())
     .limit(5);
   if (overdue.length) {
@@ -97,7 +98,8 @@ async function checkMonth(propertyId, year, month) {
   }
 
   const expiredOpen = await db('contracts')
-    .where({ property_id: propertyId, status: 'active' })
+    .where({ property_id: propertyId })
+    .whereIn('status', ['active', 'expiring'])
     .where('end_date', '<', dayjs(`${year}-${month}-01`).endOf('month').format('YYYY-MM-DD'));
   for (const c of expiredOpen) {
     errors.push({

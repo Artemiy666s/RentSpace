@@ -70,6 +70,7 @@ async function listRoomsTable(query, orgId) {
         .join('tenants as t', 't.id', 'c.tenant_id')
         .whereIn('c.status', ['active', 'expiring'])
         .whereNull('c.deleted_at')
+        .whereNull('t.deleted_at')
         .where(function () {
           this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
         })
@@ -78,6 +79,7 @@ async function listRoomsTable(query, orgId) {
           't.id as tenant_id',
           't.name as tenant_name',
           't.unp',
+          'c.id as contract_id',
           'c.contract_number',
           'c.contract_date',
           'c.start_date',
@@ -112,13 +114,14 @@ async function listRoomsTable(query, orgId) {
     )
     .leftJoin(
       db('payments')
-        .where({ period_year: year, period_month: month })
-        .select('tenant_id')
+        .where({ period_year: year, period_month: month, payment_type: 'rent' })
+        .whereNotNull('contract_id')
+        .select('contract_id')
         .sum('amount as paid_month')
-        .groupBy('tenant_id')
+        .groupBy('contract_id')
         .as('pay'),
-      'pay.tenant_id',
-      'lease.tenant_id'
+      'pay.contract_id',
+      'lease.contract_id'
     )
     .whereNull('r.deleted_at')
     .select(
@@ -129,6 +132,7 @@ async function listRoomsTable(query, orgId) {
       'lease.tenant_id',
       'lease.tenant_name',
       'lease.unp',
+      'lease.contract_id',
       'lease.contract_number',
       'lease.contract_date',
       'lease.start_date',
@@ -161,7 +165,8 @@ async function listRoomsTable(query, orgId) {
       floorName: r.floor_name,
       area: Number(r.area),
       rentableArea: Number(r.rentable_area || r.area),
-      status: r.status,
+      status:
+        r.tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
       roomType: r.room_type,
       tenantName: r.tenant_name,
       tenantUnp: r.unp,

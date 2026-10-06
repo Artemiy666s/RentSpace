@@ -8,6 +8,7 @@ const { authenticate, requireRoles } = require('../middlewares/auth');
 const { requireOrgAccess } = require('../middlewares/orgAccess');
 const { floorPlanUpload, propertyPlanUpload } = require('../middlewares/upload');
 const { STATUS_COLORS } = require('../utils/roomStatus');
+const { roomRentableArea, isOccupiedForArea } = require('../utils/rentableArea');
 const { readImageDimensions } = require('../utils/imageDimensions');
 const config = require('../config');
 const asyncHandler = require('../utils/asyncHandler');
@@ -246,7 +247,7 @@ async function buildPropertyPlanPayload(plan, propertyId) {
     db('rooms')
       .where({ property_id: propertyId })
       .whereNull('deleted_at')
-      .select('building_id', 'area', 'status'),
+      .select('id', 'building_id', 'area', 'rentable_area', 'status', 'room_type'),
     db('floors as f')
       .join('buildings as b', 'b.id', 'f.building_id')
       .where('b.property_id', propertyId)
@@ -256,6 +257,7 @@ async function buildPropertyPlanPayload(plan, propertyId) {
   ]);
 
   const shapedBuildingIds = new Set(shapes.map((s) => Number(s.building_id)));
+  const leaseByRoom = await loadActiveLeasesByRoomIds(rooms.map((r) => r.id));
 
   const statsByBuilding = {};
   for (const r of rooms) {
@@ -263,14 +265,13 @@ async function buildPropertyPlanPayload(plan, propertyId) {
     if (!statsByBuilding[bid]) {
       statsByBuilding[bid] = { totalArea: 0, rentedArea: 0, freeArea: 0, otherArea: 0 };
     }
-    const area = Number(r.area) || 0;
+    const lease = leaseByRoom.get(Number(r.id));
+    const status = occupancyFromLease(r.status, lease);
+    const area = roomRentableArea({ ...r, status });
     statsByBuilding[bid].totalArea += area;
-    if (r.status === 'free') statsByBuilding[bid].freeArea += area;
-    else if (['occupied', 'debt', 'reserved'].includes(r.status)) {
-      statsByBuilding[bid].rentedArea += area;
-    } else {
-      statsByBuilding[bid].otherArea += area;
-    }
+    if (isOccupiedForArea(status)) statsByBuilding[bid].rentedArea += area;
+    else if (['free', 'ready_for_rent'].includes(status)) statsByBuilding[bid].freeArea += area;
+    else statsByBuilding[bid].otherArea += area;
   }
 
   const floorsByBuilding = Object.fromEntries(

@@ -136,6 +136,20 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
   ]);
 
   const rooms = roomsWithFloor;
+  const asOf = dayjs().format('YYYY-MM-DD');
+  const leasedIds = await db('contract_rooms as cr')
+    .join('contracts as c', 'c.id', 'cr.contract_id')
+    .where('c.property_id', propertyId)
+    .whereIn('c.status', ['active', 'expiring'])
+    .whereNull('c.deleted_at')
+    .where(function () {
+      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+    })
+    .pluck('cr.room_id');
+  const leased = new Set(leasedIds.map((id) => Number(id)));
+  for (const r of rooms) {
+    if (leased.has(Number(r.id)) && !isOccupiedForArea(r.status)) r.status = 'occupied';
+  }
   const totalArea = sumRentableArea(rooms);
   const occupiedArea = sumRentableArea(rooms, (r) => isOccupiedForArea(r.status));
   const freeArea = Math.max(0, totalArea - occupiedArea);

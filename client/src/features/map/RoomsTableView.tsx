@@ -182,7 +182,10 @@ export function RoomsTableView({ filters, onOpenRoom, onRentOut, onChangeTenant 
 
             </Button>
 
-            {onRentOut && ['free', 'ready_for_rent', 'negotiation', 'reserved'].includes(r.status) && (
+            {onRentOut && (
+              ['free', 'ready_for_rent', 'negotiation', 'reserved'].includes(r.status) ||
+              (['occupied', 'debt'].includes(r.status) && !r.tenantName)
+            ) && (
 
               <Button variant="secondary" onClick={() => onRentOut(r.id)}>
 
@@ -192,7 +195,7 @@ export function RoomsTableView({ filters, onOpenRoom, onRentOut, onChangeTenant 
 
             )}
 
-            {onChangeTenant && ['occupied', 'debt'].includes(r.status) && (
+            {onChangeTenant && ['occupied', 'debt'].includes(r.status) && r.tenantName && (
 
               <Button variant="secondary" onClick={() => onChangeTenant(r.id)}>
 

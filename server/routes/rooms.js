@@ -32,6 +32,7 @@ router.get(
           .join('tenants as t', 't.id', 'c.tenant_id')
           .whereIn('c.status', ['active', 'expiring'])
           .whereNull('c.deleted_at')
+          .whereNull('t.deleted_at')
           .where(function () {
             this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', require('dayjs')().format('YYYY-MM-DD'));
           })
@@ -72,7 +73,13 @@ router.get(
           .orWhere('active_lease.tenant_name', 'like', s);
       });
     }
-    ok(res, await q.orderBy('r.room_number'));
+    ok(
+      res,
+      (await q.orderBy('r.room_number')).map((r) => ({
+        ...r,
+        status: r.tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
+      }))
+    );
   })
 );
 
@@ -89,6 +96,9 @@ router.post(
   '/',
   requireRoles(...ROOM_WRITE_ROLES),
   asyncHandler(async (req, res) => {
+    if (['occupied', 'debt'].includes(req.body.status)) {
+      return fail(res, 'Нельзя поставить «сдано» без договора — оформите сдачу в аренду', 400);
+    }
     const [id] = await db('rooms').insert({
       property_id: req.body.propertyId,
       building_id: req.body.buildingId,
@@ -158,6 +168,21 @@ router.put(
         Number(prevRentable) === Number(prevArea)
       ) {
         upd.rentable_area = upd.area;
+      }
+    }
+
+    if (upd.status && ['occupied', 'debt'].includes(upd.status)) {
+      const lease = await db('contract_rooms as cr')
+        .join('contracts as c', 'c.id', 'cr.contract_id')
+        .where('cr.room_id', room.id)
+        .whereIn('c.status', ['active', 'expiring'])
+        .whereNull('c.deleted_at')
+        .where(function () {
+          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', require('dayjs')().format('YYYY-MM-DD'));
+        })
+        .first();
+      if (!lease) {
+        return fail(res, 'Нельзя поставить «сдано» без договора — оформите сдачу в аренду', 400);
       }
     }
 
