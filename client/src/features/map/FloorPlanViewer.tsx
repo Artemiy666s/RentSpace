@@ -22,6 +22,10 @@ export interface MapRoom {
 
   status: string;
 
+  tenantName?: string | null;
+
+  tenantId?: number | null;
+
   fillColor?: string;
 
   shape: {
@@ -102,7 +106,7 @@ export function FloorPlanViewer({
 
       if (statusFilter && r.status !== statusFilter) return false;
 
-      if (q && !r.roomNumber.toLowerCase().includes(q) && !(r.name || '').toLowerCase().includes(q)) {
+      if (q && !r.roomNumber.toLowerCase().includes(q) && !(r.name || '').toLowerCase().includes(q) && !(r.tenantName || '').toLowerCase().includes(q)) {
 
         return false;
 
@@ -247,6 +251,8 @@ export function FloorPlanViewer({
                     roomId={room.id}
 
                     roomNumber={room.roomNumber}
+
+                    tenantName={room.tenantName}
 
                     area={room.area}
 

@@ -427,6 +427,43 @@ function parsePointsJson(raw) {
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
 
+async function loadActiveLeasesByRoomIds(roomIds) {
+  const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const asOf = require('dayjs')().format('YYYY-MM-DD');
+  const rows = await db('contract_rooms as cr')
+    .join('contracts as c', 'c.id', 'cr.contract_id')
+    .join('tenants as t', 't.id', 'c.tenant_id')
+    .whereIn('cr.room_id', ids)
+    .whereIn('c.status', ['active', 'expiring'])
+    .whereNull('c.deleted_at')
+    .whereNull('t.deleted_at')
+    .where(function () {
+      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+    })
+    .select(
+      'cr.room_id',
+      't.id as tenant_id',
+      't.name as tenant_name',
+      'c.id as contract_id',
+      'c.status as contract_status'
+    )
+    .orderBy('cr.id', 'asc');
+  const map = new Map();
+  for (const row of rows) {
+    const rid = Number(row.room_id);
+    if (!map.has(rid)) map.set(rid, row);
+  }
+  return map;
+}
+
+function occupancyFromLease(roomStatus, lease) {
+  if (!lease) return roomStatus;
+  if (roomStatus === 'debt') return 'debt';
+  if (['occupied', 'debt'].includes(roomStatus)) return roomStatus;
+  return 'occupied';
+}
+
 async function getActivePlan(floorId) {
   return db('floor_plans')
     .where({ floor_id: floorId, is_active: true })
@@ -453,16 +490,25 @@ async function buildPlanPayload(plan, floorId) {
       .select('id', 'room_number', 'name', 'area', 'status', 'room_type'),
   ]);
 
+  const leaseByRoom = await loadActiveLeasesByRoomIds([
+    ...shapes.map((s) => s.room_id),
+    ...floorRooms.map((r) => r.id),
+  ]);
+
   const rooms = shapes.map((s) => {
     const pointsJson = parsePointsJson(s.points_json);
+    const lease = leaseByRoom.get(Number(s.room_id));
+    const status = occupancyFromLease(s.status, lease);
     return {
       id: s.room_id,
       roomNumber: s.room_number,
       name: s.room_name,
       area: Number(s.area),
-      status: s.status,
+      status,
       roomType: s.room_type,
-      fillColor: s.fill_color || STATUS_COLORS[s.status] || STATUS_COLORS.free,
+      tenantName: lease?.tenant_name || null,
+      tenantId: lease?.tenant_id || null,
+      fillColor: s.fill_color || STATUS_COLORS[status] || STATUS_COLORS.free,
       shape: {
         id: s.id,
         shapeType: s.shape_type,
@@ -473,15 +519,21 @@ async function buildPlanPayload(plan, floorId) {
   });
 
   const shapedIds = new Set(rooms.map((r) => r.id));
-  const floorRoomsMeta = floorRooms.map((r) => ({
-    id: r.id,
-    roomNumber: r.room_number,
-    name: r.name,
-    area: Number(r.area),
-    status: r.status,
-    roomType: r.room_type,
-    hasShape: shapedIds.has(r.id),
-  }));
+  const floorRoomsMeta = floorRooms.map((r) => {
+    const lease = leaseByRoom.get(Number(r.id));
+    const status = occupancyFromLease(r.status, lease);
+    return {
+      id: r.id,
+      roomNumber: r.room_number,
+      name: r.name,
+      area: Number(r.area),
+      status,
+      roomType: r.room_type,
+      tenantName: lease?.tenant_name || null,
+      tenantId: lease?.tenant_id || null,
+      hasShape: shapedIds.has(r.id),
+    };
+  });
 
   return {
     plan: toPublicPlan(plan),

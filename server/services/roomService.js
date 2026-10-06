@@ -8,10 +8,13 @@ const { maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
 const { invalidateRentRegisterCache } = require('./managerDataService');
 
 function applyOpenContractRoomFilter(query, { asOf = dayjs().format('YYYY-MM-DD') } = {}) {
-  return query.where('c.status', 'active').whereNull('c.deleted_at').where(function () {
-    // Пустая строка в DATE недопустима в MySQL strict — нормализуем при записи в null.
-    this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-  });
+  return query
+    .whereIn('c.status', ['active', 'expiring'])
+    .whereNull('c.deleted_at')
+    .where(function () {
+      // Пустая строка в DATE недопустима в MySQL strict — нормализуем при записи в null.
+      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+    });
 }
 
 /** Активная связь договор↔помещение (без арендатора) — для проверок сдачи/смены. */

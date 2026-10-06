@@ -30,6 +30,13 @@
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
+.tenant {
+  font-size: 10px;
+  font-weight: 600;
+  fill: #1f4e79;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
 .techLabel {
   font-size: 10px;
   fill: #94a3b8;

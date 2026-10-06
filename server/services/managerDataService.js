@@ -68,7 +68,7 @@ async function listRoomsTable(query, orgId) {
       db('contract_rooms as cr')
         .join('contracts as c', 'c.id', 'cr.contract_id')
         .join('tenants as t', 't.id', 'c.tenant_id')
-        .where('c.status', 'active')
+        .whereIn('c.status', ['active', 'expiring'])
         .whereNull('c.deleted_at')
         .where(function () {
           this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', dayjs().format('YYYY-MM-DD'));
@@ -956,6 +956,18 @@ async function updateRentRegisterRow(contractId, body, userId) {
       if ('utilityPaid' in vals) {
         await upsertRegisterUtilityPaid(chargeContract, year, month, Number(vals.utilityPaid) || 0, userId);
       }
+    }
+  }
+
+  if (['active', 'expiring'].includes(refreshed.status)) {
+    const rate = Number(refreshed.rate_without_vat) || null;
+    for (const link of links) {
+      if (!link.room_id) continue;
+      await db('rooms').where({ id: link.room_id }).update({
+        status: 'occupied',
+        current_rate_without_vat: rate,
+        updated_at: db.fn.now(),
+      });
     }
   }
 

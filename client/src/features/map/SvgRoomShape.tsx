@@ -12,6 +12,7 @@ interface Props {
   roomNumber: string;
   area?: number;
   status: string;
+  tenantName?: string | null;
   shapeType?: string;
   pointsJson: ShapePoints;
   selected?: boolean;
@@ -34,6 +35,7 @@ function formatArea(area: number) {
 export function SvgRoomShape({
   roomId,
   roomNumber,
+  tenantName,
   area,
   status,
   shapeType,
@@ -99,11 +101,16 @@ export function SvgRoomShape({
       )}
       {!isTechnical && (pointsJson.points.length >= 1 || isPath) && (
         <g className={styles.label} pointerEvents="none">
-          <text x={cx} y={cy - 5} textAnchor="middle" className={styles.number}>
+          <text x={cx} y={cy - (tenantName ? 12 : 5)} textAnchor="middle" className={styles.number}>
             {roomNumber}
           </text>
+          {tenantName ? (
+            <text x={cx} y={cy + 4} textAnchor="middle" className={styles.tenant}>
+              {tenantName.length > 22 ? `${tenantName.slice(0, 21)}…` : tenantName}
+            </text>
+          ) : null}
           {area != null && area > 0 && (
-            <text x={cx} y={cy + 12} textAnchor="middle" className={styles.area}>
+            <text x={cx} y={cy + (tenantName ? 18 : 12)} textAnchor="middle" className={styles.area}>
               {formatArea(area)}
             </text>
           )}

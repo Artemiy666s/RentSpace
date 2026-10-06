@@ -376,6 +376,31 @@ export function MapPage() {
 
   const mapRooms: MapRoom[] = (planData?.rooms || []).map((r: MapRoom) => r);
 
+  const selectedMapRoom = mapRooms.find((r) => r.id === selectedId) || null;
+
+  const panelRoom: RoomDetail | null = roomDetail
+    ? {
+        ...roomDetail,
+        status: selectedMapRoom?.status || roomDetail.status,
+        tenant:
+          roomDetail.tenant ||
+          (selectedMapRoom?.tenantName
+            ? { id: selectedMapRoom.tenantId || 0, name: selectedMapRoom.tenantName }
+            : null),
+      }
+    : selectedMapRoom
+      ? {
+          id: selectedMapRoom.id,
+          room_number: selectedMapRoom.roomNumber,
+          name: selectedMapRoom.name,
+          area: selectedMapRoom.area,
+          status: selectedMapRoom.status,
+          tenant: selectedMapRoom.tenantName
+            ? { id: selectedMapRoom.tenantId || 0, name: selectedMapRoom.tenantName }
+            : null,
+        }
+      : null;
+
   const floorRoomsMeta = (planData?.floorRooms || []) as {
     id: number;
     status: string;
@@ -601,9 +626,9 @@ export function MapPage() {
 
           <RoomDetailsPanel
 
-            room={roomDetail ?? null}
+            room={panelRoom}
 
-            loading={roomLoading && !!selectedId}
+            loading={roomLoading && !!selectedId && !roomDetail}
 
             onRentOut={() => {
               setRentModalMode('assign');

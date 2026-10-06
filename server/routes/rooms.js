@@ -30,8 +30,11 @@ router.get(
         db('contract_rooms as cr')
           .join('contracts as c', 'c.id', 'cr.contract_id')
           .join('tenants as t', 't.id', 'c.tenant_id')
-          .where('c.status', 'active')
-          .whereNull('cr.end_date')
+          .whereIn('c.status', ['active', 'expiring'])
+          .whereNull('c.deleted_at')
+          .where(function () {
+            this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', require('dayjs')().format('YYYY-MM-DD'));
+          })
           .select(
             'cr.room_id',
             't.name as tenant_name',
