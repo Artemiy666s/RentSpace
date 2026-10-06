@@ -53,7 +53,7 @@ async function getRoomDetails(roomId) {
     utilMonth = maxDueUtilityMonth(utilYear) || 12;
   }
 
-  const [property, building, floor, activeLink, negotiation] = await Promise.all([
+  let [property, building, floor, activeLink, negotiation] = await Promise.all([
     db('properties').where({ id: room.property_id }).first(),
     db('buildings').where({ id: room.building_id }).first(),
     db('floors').where({ id: room.floor_id }).first(),
@@ -75,6 +75,70 @@ async function getRoomDetails(roomId) {
       .first()
       .catch(() => null),
   ]);
+
+  // Map room marked «сдано» with rate/area, but lease still hangs on реестр room.
+  if (!activeLink && ['occupied', 'debt'].includes(room.status)) {
+    const area = Number(room.rentable_area || room.area || 0);
+    const rate = Number(room.current_rate_without_vat || 0);
+    const asOf = dayjs().format('YYYY-MM-DD');
+    const registryLeaseSelect = () =>
+      db('contract_rooms as cr')
+        .join('contracts as c', 'c.id', 'cr.contract_id')
+        .join('tenants as t', 't.id', 'c.tenant_id')
+        .join('rooms as rr', 'rr.id', 'cr.room_id')
+        .join('floors as f', 'f.id', 'rr.floor_id')
+        .where('c.property_id', room.property_id)
+        .whereIn('c.status', ['active', 'expiring'])
+        .whereNull('c.deleted_at')
+        .whereNull('t.deleted_at')
+        .where(function () {
+          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+        })
+        .where(function () {
+          this.where('rr.room_number', 'like', 'Р%').orWhere('f.name', 'like', '%реестр%');
+        })
+        .modify((qb) => {
+          if (rate > 0) {
+            qb.whereRaw(
+              'ABS(COALESCE(cr.rate_without_vat, c.rate_without_vat, 0) - ?) <= 0.05',
+              [rate]
+            );
+          }
+        })
+        .select(
+          'c.*',
+          't.name as tenant_name',
+          't.id as tenant_id',
+          't.status as tenant_status',
+          'cr.area as contract_area',
+          'cr.rate_without_vat as room_rate'
+        )
+        .orderBy('cr.id', 'asc');
+
+    if (area > 0) {
+      activeLink = await registryLeaseSelect()
+        .whereRaw('ABS(cr.area - ?) <= 0.35', [area])
+        .first();
+    }
+
+    if (!activeLink && rate > 0) {
+      const siblings = await db('rooms')
+        .where({ floor_id: room.floor_id })
+        .whereIn('status', ['occupied', 'debt'])
+        .whereNull('deleted_at')
+        .whereRaw('ABS(COALESCE(current_rate_without_vat, 0) - ?) <= 0.05', [rate])
+        .select('id', 'area', 'rentable_area');
+      const total = siblings.reduce(
+        (s, r) => s + Number(r.rentable_area || r.area || 0),
+        0
+      );
+      if (total > 0) {
+        activeLink = await registryLeaseSelect()
+          .whereRaw('ABS(cr.area - ?) <= 0.6', [total])
+          .first();
+      }
+    }
+  }
 
   // Начисления лежат в rent_charges. Если строки нет (сдача до 15-го / снос автогенерации) —
   // один раз дописываем только уже наступивший месяц и читаем уже сохранённую сумму.
