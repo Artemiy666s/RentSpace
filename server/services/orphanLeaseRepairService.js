@@ -325,6 +325,20 @@ async function repairOrphanRows(rows, { dryRun }) {
 
   return {
     orphans: orphans.length,
+    orphanDetails: orphans.map((r) => ({
+      id: r.id,
+      building: r.building_name,
+      floor: r.floor_name,
+      level: r.level_number,
+      roomNumber: r.room_number,
+      area: Number(r.area),
+      rentableArea: Number(r.rentable_area || r.area),
+      rate: Number(r.current_rate_without_vat || 0),
+      status: r.status,
+      propertyId: r.property_id,
+      buildingId: r.building_id,
+      floorId: r.floor_id,
+    })),
     repaired,
     skipped,
     dryRun,
