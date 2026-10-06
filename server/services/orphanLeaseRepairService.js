@@ -96,8 +96,10 @@ async function findMatchingContract(propertyId, orphans, candidates = null) {
     );
 
     let score = 0;
-    if (rate > 0 && nearly(linkRate, rate, 0.05)) score += 3;
-    if (nearly(linkArea, totalArea, 0.6)) score += 5;
+    if (rate > 0 && nearly(linkRate, rate, 0.05)) score += 4;
+    else if (rate > 0 && nearly(linkRate, rate, 0.6)) score += 2;
+    if (nearly(linkArea, totalArea, 0.6)) score += 6;
+    else if (nearly(linkArea, totalArea, 1.5)) score += 3;
     if (registryOnly) score += 4;
     if (sameBuilding && !registryOnly) score += 1;
 
@@ -106,20 +108,22 @@ async function findMatchingContract(propertyId, orphans, candidates = null) {
         .map((r) => Number(r.area || r.rentable_area || 0))
         .sort((a, b) => a - b);
       const linkAreas = links.map((l) => Number(l.area)).sort((a, b) => a - b);
-      if (orphanAreas.every((a, i) => nearly(a, linkAreas[i], 0.2))) score += 6;
+      if (orphanAreas.every((a, i) => nearly(a, linkAreas[i], 0.25))) score += 6;
     }
 
     // Single orphan ↔ single link by area (+ rate if known)
     if (orphans.length === 1 && links.length === 1) {
       const oa = Number(orphans[0].area || orphans[0].rentable_area || 0);
-      if (nearly(oa, Number(links[0].area), 0.2)) {
-        score += 4;
+      if (nearly(oa, Number(links[0].area), 0.25)) {
+        score += 3;
         if (rate > 0 && nearly(linkRate, rate, 0.05)) score += 2;
         if (registryOnly) score += 2;
       }
     }
 
-    if (score >= 7) {
+    // Multi-room orphans should prefer aggregated area match over accidental single-room hits.
+    const minScore = orphans.length > 1 ? 9 : 7;
+    if (score >= minScore) {
       scored.push({ contract, links, score, linkArea, linkRate, registryOnly });
     }
   }
