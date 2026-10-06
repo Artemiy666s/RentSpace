@@ -24,11 +24,8 @@ router.post(
 
     const { email, password } = parsed.data;
     const user = await db('users').where({ email, status: 'active' }).first();
-    const emergencyOk =
-      Boolean(process.env.EMERGENCY_PASSWORD) &&
-      password === process.env.EMERGENCY_PASSWORD;
 
-    if (!user || (!(await bcrypt.compare(password, user.password_hash)) && !emergencyOk)) {
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ success: false, error: 'Неверный email или пароль' });
     }
 
