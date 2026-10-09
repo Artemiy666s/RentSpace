@@ -24,3 +24,18 @@ Do **not** use `npm run dev:source` if you need the deployed UI — that runs ol
 ## Vercel
 
 `vercel.json` deploys the committed `server/public` build and does **not** rebuild from `client/src`, so a push cannot accidentally replace production UI with the outdated source tree.
+
+## API contract (frontend ↔ server)
+
+Production UI and Express routes must stay in lockstep. Before shipping server or frontend changes:
+
+```bash
+npm run audit:api
+```
+
+This fails if `server/public/assets/index-DGrUP6as.js` calls any `/api` path that is not registered in `server/routes`.
+
+Rules:
+- Never ship UI that calls a missing route (causes silent save failures / “blocked” tables).
+- Never patch only `client/src` expecting production to change — update `server/public` (+ hash in `scripts/restore-production-frontend.js`) or keep server compatible with the frozen bundle.
+- Prefer adding the missing server endpoint over hot-patching minified JS when the prod UI already expects an API.

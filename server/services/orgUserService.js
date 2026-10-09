@@ -67,6 +67,7 @@ async function listOrgUsers(actor, requestedOrgId) {
   const rows = await db('users')
     .where({ organization_id: orgId })
     .whereNot({ role: ROLES.SUPER_ADMIN })
+    .whereNot({ status: 'archived' })
     .orderBy('name', 'asc');
   return rows.map(formatUser);
 }
@@ -167,11 +168,37 @@ async function resetOrgUserPassword(actor, userId, newPassword) {
   });
 }
 
+/** Soft-delete: archive user (production Settings UI calls DELETE /org/users/:id). */
+async function deleteOrgUser(actor, userId) {
+  const target = await db('users').where({ id: userId }).first();
+  if (!target) {
+    const err = new Error('not_found');
+    err.status = 404;
+    throw err;
+  }
+  if (!canManageUser(actor, target)) {
+    const err = new Error('forbidden');
+    err.status = 403;
+    throw err;
+  }
+  if (Number(target.id) === Number(actor.id)) {
+    const err = new Error('cannot_block_self');
+    err.status = 400;
+    throw err;
+  }
+  await db('users').where({ id: userId }).update({
+    status: 'archived',
+    updated_at: db.fn.now(),
+  });
+  return { id: userId, deleted: true };
+}
+
 module.exports = {
   assignableRolesFor,
   listOrgUsers,
   createOrgUser,
   updateOrgUser,
   resetOrgUserPassword,
+  deleteOrgUser,
   formatUser,
 };

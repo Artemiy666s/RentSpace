@@ -28,7 +28,8 @@
     "test": "node scripts/test-db.js && node scripts/test-api.js && node scripts/test-floor-plan.js",
     "test:db": "node scripts/test-db.js",
     "test:api": "node scripts/test-api.js",
-    "test:floor-plan": "node scripts/test-floor-plan.js"
+    "test:floor-plan": "node scripts/test-floor-plan.js",
+    "audit:api": "node scripts/audit-api-contract.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

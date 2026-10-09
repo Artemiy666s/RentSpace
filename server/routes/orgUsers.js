@@ -139,4 +139,18 @@ router.patch(
   })
 );
 
+router.delete(
+  '/users/:id',
+  authenticate,
+  requireRoles(...ORG_USER_ADMIN_ROLES),
+  asyncHandler(async (req, res) => {
+    try {
+      const data = await orgUserService.deleteOrgUser(req.user, Number(req.params.id));
+      res.json({ success: true, data });
+    } catch (err) {
+      mapError(err, res);
+    }
+  })
+);
+
 module.exports = router;
