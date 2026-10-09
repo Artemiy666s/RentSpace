@@ -77,9 +77,46 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   }
   utilMonths.sort((a, b) => b.month - a.month);
 
+  // Задолженность по коммуналке — отдельно от аренды (due − оплаты), разбивка с конца периода.
+  const utilMonthDebtTotals = {};
+  let utilityDebt = 0;
+  for (const row of registerRows) {
+    let dueUtil = 0;
+    let utilPaidYear = 0;
+    for (let m = 1; m <= 12; m++) {
+      if (m <= utilDueThrough) dueUtil += Number(row.months?.[m]?.utility || 0);
+      utilPaidYear += Number(row.months?.[m]?.utilityPaid || 0);
+    }
+    const contractUtilDebt = roundMoney(Math.max(0, dueUtil - utilPaidYear));
+    if (contractUtilDebt <= 0.005) continue;
+    utilityDebt = roundMoney(utilityDebt + contractUtilDebt);
+
+    let remaining = contractUtilDebt;
+    for (let m = utilDueThrough; m >= 1 && remaining > 0.005; m -= 1) {
+      const charged = Number(row.months?.[m]?.utility || 0);
+      if (charged <= 0) continue;
+      const slice = Math.min(charged, remaining);
+      const monthDebt = roundMoney(slice);
+      if (monthDebt <= 0.005) continue;
+      utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + monthDebt);
+      remaining = roundMoney(remaining - monthDebt);
+    }
+  }
+
+  const utilityDebtMonths = Object.entries(utilMonthDebtTotals)
+    .map(([month, amount]) => ({
+      year,
+      month: Number(month),
+      amount: roundMoney(amount),
+    }))
+    .filter((row) => row.amount > 0.005)
+    .sort((a, b) => b.month - a.month);
+
   const utilities = {
     charged: roundMoney(utilMonths.reduce((s, row) => s + row.charged, 0)),
     paid: roundMoney(utilMonths.reduce((s, row) => s + row.paid, 0)),
+    debt: utilityDebt,
+    debtMonths: utilityDebtMonths,
     months: utilMonths,
   };
 

@@ -110,3 +110,170 @@
   color: var(--color-danger);
   margin-bottom: 12px;
 }
+
+.controlsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.searchWrap {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 360px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-muted);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px 10px 38px;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-border);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--color-surface-solid, #fff);
+  color: var(--color-text);
+}
+
+.viewToggle {
+  display: inline-flex;
+  border: 1.5px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-surface-solid, #fff);
+}
+
+.viewBtn {
+  border: none;
+  background: transparent;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.viewBtnActive {
+  background: var(--selection-bg, var(--btn-gradient));
+  color: var(--selection-color, #fff);
+}
+
+.splitWrap {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-solid, #fff);
+}
+
+.splitTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 720px;
+}
+
+.splitTable th,
+.splitTable td {
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px 10px;
+  vertical-align: middle;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.splitTable thead th {
+  background: var(--color-table-head, #f7f9fc);
+  font-weight: 700;
+  color: var(--color-navy, var(--color-text));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.monthGroup {
+  text-align: center !important;
+  border-left: 1px solid var(--color-border);
+}
+
+.subCol {
+  text-align: right !important;
+  font-weight: 600;
+  color: var(--color-muted);
+  border-left: 1px solid var(--color-border);
+  min-width: 72px;
+}
+
+.indicatorCol {
+  min-width: 88px;
+}
+
+.indicatorCell {
+  font-weight: 600;
+  color: var(--color-navy, var(--color-text));
+  background: rgba(18, 103, 232, 0.04);
+}
+
+.numCol {
+  width: 48px;
+  text-align: center !important;
+}
+
+.numCell {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.splitRow {
+  cursor: pointer;
+}
+
+.splitRow:hover td {
+  background: rgba(18, 103, 232, 0.06);
+}
+
+.splitRowAlt td:not(.indicatorCell) {
+  background: rgba(6, 27, 51, 0.02);
+}
+
+.totalRow td {
+  font-weight: 700;
+  background: var(--color-table-head, #f0f4fa);
+}
+
+.totalLabel {
+  font-weight: 800;
+}
+
+.emptyCell {
+  text-align: center !important;
+  color: var(--color-muted);
+  padding: 24px 12px !important;
+}
+
+@media (max-width: 900px) {
+  .viewToggle {
+    width: 100%;
+  }
+
+  .viewBtn {
+    flex: 1;
+  }
+
+  .searchWrap {
+    max-width: none;
+  }
+}

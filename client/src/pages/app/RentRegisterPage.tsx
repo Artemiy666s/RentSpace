@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileSpreadsheet, FileText, X } from 'lucide-react';
+import { FileSpreadsheet, FileText, Search, X } from 'lucide-react';
 import { api } from '@/api/client';
 import { usePropertyStore } from '@/store/propertyStore';
 import { useI18n } from '@/i18n/useI18n';
@@ -16,18 +16,38 @@ import { downloadApiFile } from '@/lib/exportFile';
 import { RentRegisterRowModal, type RentRegisterRow } from '@/features/finance/RentRegisterRowModal';
 import styles from './RentRegisterPage.module.css';
 
+type MonthAmounts = {
+  rent: number;
+  paid: number;
+  utility: number;
+  utilityPaid: number;
+};
+
 type RegisterRow = RentRegisterRow & {
-  months: Record<number, { rent: number; utility: number }>;
+  contractNumber?: string;
+  months: Record<number, MonthAmounts>;
   total: number;
 };
+
+type ViewMode = 'classic' | 'split';
 
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 function defaultVisibleMonths(date = new Date()): number[] {
-  const current = date.getMonth() + 1;
-  const prev = current === 1 ? 12 : current - 1;
-  const next = current === 12 ? 1 : current + 1;
-  return [prev, current, next];
+  return [date.getMonth() + 1];
+}
+
+function matchesSearch(row: RegisterRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [row.tenantName, row.contractNumber, row.contractLabel]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase())
+    .some((v) => v.includes(q));
+}
+
+function fmt(n: number | null | undefined): string {
+  return n != null ? Number(n).toFixed(2) : '0.00';
 }
 
 export function RentRegisterPage() {
@@ -37,6 +57,8 @@ export function RentRegisterPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() => defaultVisibleMonths());
   const [selectedRow, setSelectedRow] = useState<RegisterRow | null>(null);
+  const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<ViewMode>('classic');
 
   const { data: properties } = useQuery({
     queryKey: ['properties'],
@@ -83,7 +105,14 @@ export function RentRegisterPage() {
 
   const availableMonths = ALL_MONTHS.filter((m) => !selectedMonths.includes(m));
 
+  const filteredRows = useMemo(
+    () => (data?.rows ?? []).filter((row) => matchesSearch(row, search)),
+    [data?.rows, search]
+  );
+
   const columns: Column<RegisterRow>[] = useMemo(() => {
+    const compact = selectedMonths.length > 4;
+    const monthW = compact ? '76px' : '100px';
     const base: Column<RegisterRow>[] = [
       {
         key: 'n',
@@ -98,7 +127,7 @@ export function RentRegisterPage() {
       {
         key: 'tenant',
         title: t('rentRegister.colTenant'),
-        width: '22%',
+        width: '150px',
         sortable: true,
         sortValue: (r) => r.tenantName,
         render: (r) => r.tenantName,
@@ -106,7 +135,7 @@ export function RentRegisterPage() {
       {
         key: 'contract',
         title: t('rentRegister.colContract'),
-        width: '18%',
+        width: '115px',
         sortable: true,
         sortValue: (r) => r.contractLabel,
         render: (r) => r.contractLabel,
@@ -115,7 +144,7 @@ export function RentRegisterPage() {
         key: 'area',
         title: t('rentRegister.colArea'),
         align: 'right',
-        width: '10%',
+        width: '96px',
         sortable: true,
         sortType: 'number',
         sortValue: (r) => r.area,
@@ -125,7 +154,7 @@ export function RentRegisterPage() {
         key: 'rate',
         title: t('rentRegister.colRate'),
         align: 'right',
-        width: '10%',
+        width: '96px',
         sortable: true,
         sortType: 'number',
         sortValue: (r) => r.rateWithoutVat ?? 0,
@@ -133,62 +162,61 @@ export function RentRegisterPage() {
       },
     ];
 
-    const monthColumns = selectedMonths.flatMap((m) => [
-      {
-        key: `r${m}`,
-        title: t('common.rentMonth', { month: monthShortLabel(t, m) }),
-        align: 'right' as const,
-        sortable: true,
-        sortType: 'number' as const,
-        sortValue: (r: RegisterRow) => r.months[m]?.rent ?? 0,
-        render: (r: RegisterRow) => (r.months[m]?.rent != null ? r.months[m].rent.toFixed(2) : '0.00'),
-      },
-      {
-        key: `u${m}`,
-        title: t('common.reimbMonth', { month: monthShortLabel(t, m) }),
-        align: 'right' as const,
-        sortable: true,
-        sortType: 'number' as const,
-        sortValue: (r: RegisterRow) => r.months[m]?.utility ?? 0,
-        render: (r: RegisterRow) => (r.months[m]?.utility != null ? r.months[m].utility.toFixed(2) : '0.00'),
-      },
-    ]);
+    const monthColumns = selectedMonths.flatMap((m) => {
+      const label = monthShortLabel(t, m);
+      return [
+        {
+          key: `r${m}`,
+          title: t('common.rentMonth', { month: label }),
+          align: 'right' as const,
+          width: monthW,
+          sortable: true,
+          sortType: 'number' as const,
+          sortValue: (r: RegisterRow) => r.months[m]?.rent ?? 0,
+          render: (r: RegisterRow) => fmt(r.months[m]?.rent),
+        },
+        {
+          key: `pd${m}`,
+          title: t('common.paidMonth', { month: label }),
+          align: 'right' as const,
+          width: monthW,
+          sortable: true,
+          sortType: 'number' as const,
+          sortValue: (r: RegisterRow) => r.months[m]?.paid ?? 0,
+          render: (r: RegisterRow) => fmt(r.months[m]?.paid),
+        },
+        {
+          key: `ut${m}`,
+          title: t('common.utilMonth', { month: label }),
+          align: 'right' as const,
+          width: monthW,
+          sortable: true,
+          sortType: 'number' as const,
+          sortValue: (r: RegisterRow) => r.months[m]?.utility ?? 0,
+          render: (r: RegisterRow) => fmt(r.months[m]?.utility),
+        },
+        {
+          key: `up${m}`,
+          title: t('common.utilPaidMonth', { month: label }),
+          align: 'right' as const,
+          width: monthW,
+          sortable: true,
+          sortType: 'number' as const,
+          sortValue: (r: RegisterRow) => r.months[m]?.utilityPaid ?? 0,
+          render: (r: RegisterRow) => fmt(r.months[m]?.utilityPaid),
+        },
+      ];
+    });
 
     const totalColumns: Column<RegisterRow>[] = [
-      {
-        key: 'totalRent',
-        title: t('common.totalRent'),
-        align: 'right',
-        sortable: true,
-        sortType: 'number',
-        sortValue: (r) => r.totalRent ?? 0,
-        render: (r) => (r.totalRent != null ? Number(r.totalRent).toFixed(2) : '0.00'),
-      },
-      {
-        key: 'totalUtil',
-        title: t('common.totalReimb'),
-        align: 'right',
-        sortable: true,
-        sortType: 'number',
-        sortValue: (r) => r.totalUtil ?? 0,
-        render: (r) => (r.totalUtil != null ? Number(r.totalUtil).toFixed(2) : '0.00'),
-      },
       {
         key: 'debt',
         title: t('common.debt'),
         align: 'right',
         sortable: true,
         sortType: 'number',
-        sortValue: (r) => r.debt,
-        render: (r) => r.debt.toFixed(2),
-      },
-      {
-        key: 'status',
-        title: t('common.status'),
-        width: '10%',
-        sortable: true,
-        sortValue: (r) => r.status,
-        render: (r) => r.status,
+        sortValue: (r) => r.debt ?? 0,
+        render: (r) => fmt(r.debt),
       },
     ];
 
@@ -197,50 +225,55 @@ export function RentRegisterPage() {
 
   const accessors = useMemo(() => accessorsFromColumns(columns), [columns]);
   const { sortedRows, sortKey, sortDirection, handleSort, applyPreset, activePreset } = useTableSort(
-    data?.rows,
+    filteredRows,
     accessors,
     { nameKey: 'tenant' }
   );
 
   const totals = useMemo(() => {
-    const rows = data?.rows ?? [];
-    const monthTotals: Record<number, { rent: number; utility: number }> = {};
+    const monthTotals: Record<number, MonthAmounts> = {};
     for (const m of selectedMonths) {
-      monthTotals[m] = rows.reduce(
+      monthTotals[m] = filteredRows.reduce(
         (acc, row) => {
           acc.rent += row.months[m]?.rent ?? 0;
+          acc.paid += row.months[m]?.paid ?? 0;
           acc.utility += row.months[m]?.utility ?? 0;
+          acc.utilityPaid += row.months[m]?.utilityPaid ?? 0;
           return acc;
         },
-        { rent: 0, utility: 0 }
+        { rent: 0, paid: 0, utility: 0, utilityPaid: 0 }
       );
     }
     return {
       monthTotals,
-      totalRent: rows.reduce((s, r) => s + (r.totalRent ?? 0), 0),
-      totalUtil: rows.reduce((s, r) => s + (r.totalUtil ?? 0), 0),
-      debt: rows.reduce((s, r) => s + (r.debt ?? 0), 0),
+      debt: filteredRows.reduce((s, r) => s + (r.debt ?? 0), 0),
     };
-  }, [data?.rows, selectedMonths]);
+  }, [filteredRows, selectedMonths]);
 
   const footerCells = useMemo(() => {
     if (!sortedRows.length) return undefined;
     return columns.map((col) => {
       if (col.key === 'tenant') return t('rentRegister.totalRow');
-      if (col.key === 'n' || col.key === 'contract' || col.key === 'area' || col.key === 'rate' || col.key === 'status') {
+      if (col.key === 'n' || col.key === 'contract' || col.key === 'area' || col.key === 'rate') {
         return '';
       }
       if (col.key.startsWith('r')) {
         const m = Number(col.key.slice(1));
-        return totals.monthTotals[m]?.rent.toFixed(2) ?? '0.00';
+        return fmt(totals.monthTotals[m]?.rent);
       }
-      if (col.key.startsWith('u')) {
-        const m = Number(col.key.slice(1));
-        return totals.monthTotals[m]?.utility.toFixed(2) ?? '0.00';
+      if (col.key.startsWith('pd')) {
+        const m = Number(col.key.slice(2));
+        return fmt(totals.monthTotals[m]?.paid);
       }
-      if (col.key === 'totalRent') return totals.totalRent.toFixed(2);
-      if (col.key === 'totalUtil') return totals.totalUtil.toFixed(2);
-      if (col.key === 'debt') return totals.debt.toFixed(2);
+      if (col.key.startsWith('ut')) {
+        const m = Number(col.key.slice(2));
+        return fmt(totals.monthTotals[m]?.utility);
+      }
+      if (col.key.startsWith('up')) {
+        const m = Number(col.key.slice(2));
+        return fmt(totals.monthTotals[m]?.utilityPaid);
+      }
+      if (col.key === 'debt') return fmt(totals.debt);
       return '';
     });
   }, [columns, sortedRows.length, totals, t]);
@@ -266,6 +299,8 @@ export function RentRegisterPage() {
       `rent-register-${year}.html`
     );
   };
+
+  const emptyText = search.trim() ? t('rentRegister.noSearchResults') : t('common.noData');
 
   return (
     <div className={styles.page}>
@@ -349,17 +384,136 @@ export function RentRegisterPage() {
 
       {isError && (
         <p className={styles.error}>
-          {t('rentRegister.loadError')}{' '}
-          {(error as Error)?.message || ''}
+          {t('rentRegister.loadError')} {(error as Error)?.message || ''}
         </p>
       )}
-      <div className={listingStyles.toolbar}>
+
+      <div className={styles.controlsRow}>
+        <label className={styles.searchWrap}>
+          <Search size={18} className={styles.searchIcon} aria-hidden />
+          <input
+            type="search"
+            className={styles.searchInput}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('rentRegister.searchPlaceholder')}
+            aria-label={t('rentRegister.searchPlaceholder')}
+          />
+        </label>
+        <div className={styles.viewToggle} role="group" aria-label={t('rentRegister.viewLabel')}>
+          <button
+            type="button"
+            className={`${styles.viewBtn} ${viewMode === 'classic' ? styles.viewBtnActive : ''}`}
+            onClick={() => setViewMode('classic')}
+          >
+            {t('rentRegister.viewClassic')}
+          </button>
+          <button
+            type="button"
+            className={`${styles.viewBtn} ${viewMode === 'split' ? styles.viewBtnActive : ''}`}
+            onClick={() => setViewMode('split')}
+          >
+            {t('rentRegister.viewSplit')}
+          </button>
+        </div>
         <TableSortBar value={activePreset} onChange={applyPreset} showDatePresets={false} />
       </div>
       <p className={listingStyles.sortHint}>{t('tableSort.columnHint')}</p>
 
       {isLoading ? (
         <p>{t('common.loading')}</p>
+      ) : viewMode === 'split' ? (
+        <div className={styles.splitWrap}>
+          <table className={styles.splitTable}>
+            <thead>
+              <tr>
+                <th rowSpan={2} className={styles.numCol}>
+                  №
+                </th>
+                <th rowSpan={2}>{t('rentRegister.colTenant')}</th>
+                <th rowSpan={2}>{t('rentRegister.colContract')}</th>
+                <th rowSpan={2} className={styles.numCell}>
+                  {t('rentRegister.colArea')}
+                </th>
+                <th rowSpan={2} className={styles.numCell}>
+                  {t('rentRegister.colRate')}
+                </th>
+                <th rowSpan={2} className={styles.indicatorCol}>
+                  {t('rentRegister.colIndicator')}
+                </th>
+                {selectedMonths.map((m) => (
+                  <th key={m} colSpan={2} className={styles.monthGroup}>
+                    {monthShortLabel(t, m)}
+                  </th>
+                ))}
+                <th rowSpan={2} className={styles.numCell}>
+                  {t('common.debt')}
+                </th>
+              </tr>
+              <tr>
+                {selectedMonths.map((m) => (
+                  <Fragment key={m}>
+                    <th className={styles.subCol}>{t('rentRegister.chargedShort')}</th>
+                    <th className={styles.subCol}>{t('rentRegister.paidShort')}</th>
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6 + selectedMonths.length * 2 + 1} className={styles.emptyCell}>
+                    {emptyText}
+                  </td>
+                </tr>
+              ) : (
+                sortedRows.map((row) => (
+                  <SplitTenantRows
+                    key={row.rowNum}
+                    row={row}
+                    months={selectedMonths}
+                    onClick={() => setSelectedRow(row)}
+                    t={t}
+                  />
+                ))
+              )}
+            </tbody>
+            {sortedRows.length > 0 && (
+              <tfoot>
+                <tr className={styles.totalRow}>
+                  <td rowSpan={2} />
+                  <td rowSpan={2} className={styles.totalLabel}>
+                    {t('rentRegister.totalRow')}
+                  </td>
+                  <td rowSpan={2} />
+                  <td rowSpan={2} />
+                  <td rowSpan={2} />
+                  <td className={styles.indicatorCell}>{t('rentRegister.indicatorRent')}</td>
+                  {selectedMonths.map((m) => (
+                    <FragmentMonthValues
+                      key={`tr-${m}`}
+                      charged={totals.monthTotals[m]?.rent}
+                      paid={totals.monthTotals[m]?.paid}
+                    />
+                  ))}
+                  <td rowSpan={2} className={styles.numCell}>
+                    {fmt(totals.debt)}
+                  </td>
+                </tr>
+                <tr className={styles.totalRow}>
+                  <td className={styles.indicatorCell}>{t('rentRegister.indicatorUtil')}</td>
+                  {selectedMonths.map((m) => (
+                    <FragmentMonthValues
+                      key={`tu-${m}`}
+                      charged={totals.monthTotals[m]?.utility}
+                      paid={totals.monthTotals[m]?.utilityPaid}
+                    />
+                  ))}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
       ) : (
         <DataTable
           columns={columns}
@@ -370,6 +524,7 @@ export function RentRegisterPage() {
           sortDirection={sortDirection}
           onSort={handleSort}
           footerCells={footerCells}
+          emptyText={emptyText}
         />
       )}
 
@@ -380,5 +535,61 @@ export function RentRegisterPage() {
         onClose={() => setSelectedRow(null)}
       />
     </div>
+  );
+}
+
+function FragmentMonthValues({ charged, paid }: { charged?: number; paid?: number }) {
+  return (
+    <>
+      <td className={styles.numCell}>{fmt(charged)}</td>
+      <td className={styles.numCell}>{fmt(paid)}</td>
+    </>
+  );
+}
+
+function SplitTenantRows({
+  row,
+  months,
+  onClick,
+  t,
+}: {
+  row: RegisterRow;
+  months: number[];
+  onClick: () => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
+}) {
+  return (
+    <>
+      <tr className={styles.splitRow} onClick={onClick}>
+        <td rowSpan={2} className={styles.numCol}>
+          {row.rowNum}
+        </td>
+        <td rowSpan={2}>{row.tenantName}</td>
+        <td rowSpan={2}>{row.contractLabel}</td>
+        <td rowSpan={2} className={styles.numCell}>
+          {row.area} {t('common.sqm')}
+        </td>
+        <td rowSpan={2} className={styles.numCell}>
+          {row.rateWithoutVat != null ? Number(row.rateWithoutVat).toFixed(2) : '—'}
+        </td>
+        <td className={styles.indicatorCell}>{t('rentRegister.indicatorRent')}</td>
+        {months.map((m) => (
+          <FragmentMonthValues key={`r-${m}`} charged={row.months[m]?.rent} paid={row.months[m]?.paid} />
+        ))}
+        <td rowSpan={2} className={styles.numCell}>
+          {fmt(row.debt)}
+        </td>
+      </tr>
+      <tr className={`${styles.splitRow} ${styles.splitRowAlt}`} onClick={onClick}>
+        <td className={styles.indicatorCell}>{t('rentRegister.indicatorUtil')}</td>
+        {months.map((m) => (
+          <FragmentMonthValues
+            key={`u-${m}`}
+            charged={row.months[m]?.utility}
+            paid={row.months[m]?.utilityPaid}
+          />
+        ))}
+      </tr>
+    </>
   );
 }
