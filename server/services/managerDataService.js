@@ -1420,23 +1420,40 @@ async function getPlanFactMatrix(propertyId, year) {
   return { year, months: MONTH_NAMES, rows };
 }
 
+const DEFAULT_EXPENSE_CATEGORIES = [
+  { code: 'wood', label: 'Дрова' },
+  { code: 'heating', label: 'Отопление' },
+  { code: 'salary', label: 'Зарплата' },
+  { code: 'taxes', label: 'Налоги' },
+  { code: 'cutting', label: 'Пиление / распил' },
+  { code: 'utilities', label: 'Коммунальные расходы' },
+  { code: 'repair', label: 'Ремонт' },
+  { code: 'maintenance', label: 'Обслуживание' },
+  { code: 'security', label: 'Охрана' },
+  { code: 'cleaning', label: 'Уборка' },
+  { code: 'other', label: 'Прочее' },
+];
+
+async function loadExpenseCategoryLabels(propertyId) {
+  try {
+    const rows = await db('expense_category_labels')
+      .where({ property_id: propertyId })
+      .select('category_code', 'label');
+    return Object.fromEntries(rows.map((r) => [r.category_code, r.label]));
+  } catch {
+    return {};
+  }
+}
+
 async function getExpensesSummary(propertyId, year) {
   const rows = await db('expenses')
     .where({ property_id: propertyId, period_year: year });
 
-  const categories = [
-    { code: 'wood', label: 'Дрова' },
-    { code: 'heating', label: 'Отопление' },
-    { code: 'salary', label: 'Зарплата' },
-    { code: 'taxes', label: 'Налоги' },
-    { code: 'cutting', label: 'Пиление / распил' },
-    { code: 'utilities', label: 'Коммунальные расходы' },
-    { code: 'repair', label: 'Ремонт' },
-    { code: 'maintenance', label: 'Обслуживание' },
-    { code: 'security', label: 'Охрана' },
-    { code: 'cleaning', label: 'Уборка' },
-    { code: 'other', label: 'Прочее' },
-  ];
+  const customLabels = await loadExpenseCategoryLabels(propertyId);
+  const categories = DEFAULT_EXPENSE_CATEGORIES.map((cat) => ({
+    ...cat,
+    label: customLabels[cat.code] || cat.label,
+  }));
 
   const matrix = categories.map((cat) => {
     const months = {};
@@ -1452,6 +1469,140 @@ async function getExpensesSummary(propertyId, year) {
   });
 
   return { categories: matrix, operations: rows };
+}
+
+/**
+ * Upsert one expenses matrix cell (category × month).
+ * amount <= 0 clears the cell. Used by production Expenses UI.
+ */
+async function upsertExpenseCell(body, userId) {
+  const propertyId = Number(body.propertyId);
+  const year = Number(body.year);
+  const periodMonth = Number(body.periodMonth);
+  const category = String(body.category || '').trim();
+  const amount = Number(body.amount);
+
+  if (!propertyId || !year || !periodMonth || periodMonth < 1 || periodMonth > 12) {
+    const err = new Error('Неверные параметры ячейки расходов');
+    err.status = 400;
+    throw err;
+  }
+  if (!DEFAULT_EXPENSE_CATEGORIES.some((c) => c.code === category)) {
+    const err = new Error('Неизвестная категория расхода');
+    err.status = 400;
+    throw err;
+  }
+
+  const property = await db('properties').where({ id: propertyId }).first();
+  if (!property) {
+    const err = new Error('Объект не найден');
+    err.status = 404;
+    throw err;
+  }
+
+  const existing = await db('expenses')
+    .where({
+      property_id: propertyId,
+      period_year: year,
+      period_month: periodMonth,
+      category,
+    })
+    .orderBy('id', 'asc');
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    if (existing.length) {
+      await db('expenses')
+        .whereIn(
+          'id',
+          existing.map((r) => r.id)
+        )
+        .delete();
+    }
+    return { cleared: true, propertyId, year, periodMonth, category };
+  }
+
+  const expenseDate =
+    body.expenseDate ||
+    `${year}-${String(periodMonth).padStart(2, '0')}-15`;
+  const description = body.description != null ? String(body.description) : null;
+
+  if (existing.length) {
+    const [primary, ...rest] = existing;
+    await db('expenses').where({ id: primary.id }).update({
+      amount,
+      expense_date: expenseDate,
+      description,
+      updated_at: db.fn.now(),
+    });
+    if (rest.length) {
+      await db('expenses')
+        .whereIn(
+          'id',
+          rest.map((r) => r.id)
+        )
+        .delete();
+    }
+    return { id: primary.id, updated: true };
+  }
+
+  const [id] = await db('expenses').insert({
+    organization_id: property.organization_id,
+    property_id: propertyId,
+    expense_date: expenseDate,
+    period_year: year,
+    period_month: periodMonth,
+    category,
+    amount,
+    description,
+    created_by: userId || null,
+  });
+  return { id, created: true };
+}
+
+async function renameExpenseCategory(propertyId, categoryCode, label) {
+  const code = String(categoryCode || '').trim();
+  const name = String(label || '').trim();
+  if (!DEFAULT_EXPENSE_CATEGORIES.some((c) => c.code === code)) {
+    const err = new Error('Неизвестная категория расхода');
+    err.status = 400;
+    throw err;
+  }
+  if (!name) {
+    const err = new Error('Укажите название категории');
+    err.status = 400;
+    throw err;
+  }
+
+  const property = await db('properties').where({ id: propertyId }).first();
+  if (!property) {
+    const err = new Error('Объект не найден');
+    err.status = 404;
+    throw err;
+  }
+
+  try {
+    const existing = await db('expense_category_labels')
+      .where({ property_id: propertyId, category_code: code })
+      .first();
+    if (existing) {
+      await db('expense_category_labels').where({ id: existing.id }).update({
+        label: name,
+        updated_at: db.fn.now(),
+      });
+    } else {
+      await db('expense_category_labels').insert({
+        organization_id: property.organization_id,
+        property_id: propertyId,
+        category_code: code,
+        label: name,
+      });
+    }
+  } catch (e) {
+    const err = new Error('Переименование категорий недоступно в этой базе');
+    err.status = 501;
+    throw err;
+  }
+  return { code, label: name };
 }
 
 module.exports = {
@@ -1473,5 +1624,7 @@ module.exports = {
   updatePlanFactRow,
   PLAN_FACT_METRICS,
   getExpensesSummary,
+  upsertExpenseCell,
+  renameExpenseCategory,
   MONTH_NAMES,
 };

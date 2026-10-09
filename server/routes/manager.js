@@ -18,6 +18,8 @@ const {
   updatePlanFactMetric,
   updatePlanFactRow,
   getExpensesSummary,
+  upsertExpenseCell,
+  renameExpenseCategory,
 } = require('../services/managerDataService');
 const { checkMonth, closeMonth, getMonthReadiness } = require('../services/monthCloseService');
 const { startNegotiation, updateNegotiation } = require('../services/negotiationService');
@@ -356,6 +358,34 @@ router.get(
     const year = Number(req.query.year) || new Date().getFullYear();
     if (!propertyId) return fail(res, 'Укажите propertyId', 400);
     ok(res, await getExpensesSummary(propertyId, year));
+  })
+);
+
+router.post(
+  '/expenses/cell',
+  requireRoles(...FINANCE_WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    try {
+      ok(res, await upsertExpenseCell(req.body || {}, req.user.id));
+    } catch (e) {
+      if (e.status) return fail(res, e.message, e.status);
+      throw e;
+    }
+  })
+);
+
+router.put(
+  '/expenses/categories/:code',
+  requireRoles(...FINANCE_WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    const propertyId = Number(req.body?.propertyId);
+    if (!propertyId) return fail(res, 'Укажите propertyId', 400);
+    try {
+      ok(res, await renameExpenseCategory(propertyId, req.params.code, req.body?.label));
+    } catch (e) {
+      if (e.status) return fail(res, e.message, e.status);
+      throw e;
+    }
   })
 );
 
