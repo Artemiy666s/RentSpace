@@ -14,9 +14,9 @@ const targets = [
 ];
 
 const SPLIT_CSS = [
-  '._splitWrap_ogxkk_903{width:100%;overflow:auto;border:1px solid var(--color-border);border-radius:12px;background:var(--color-surface-solid,#fff);position:relative}',
-  '._splitTable_ogxkk_904{border-collapse:separate;border-spacing:0;font-size:12.5px;line-height:1.25}',
-  '._splitTableFixed_ogxkk_913{table-layout:fixed;border-collapse:separate}',
+  '._splitWrap_ogxkk_903{width:100%;overflow:hidden;border:1px solid var(--color-border);border-radius:12px;background:var(--color-surface-solid,#fff);position:relative}',
+  '._splitTable_ogxkk_904{width:100%;max-width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;line-height:1.25}',
+  '._splitTableFixed_ogxkk_913{table-layout:fixed;width:100%;max-width:100%;border-collapse:separate}',
   '._splitTable_ogxkk_904 th,._splitTable_ogxkk_904 td{border-bottom:1px solid var(--color-border);border-right:1px solid rgba(6,27,51,.06);padding:4px 8px;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:var(--rr-row-h,28px);height:auto;box-sizing:border-box}',
   '._splitTable_ogxkk_904 tbody td:not([rowspan]){height:var(--rr-row-h,28px)}',
   '._splitTable_ogxkk_904 thead th{background:var(--color-table-head,#f7f9fc);font-weight:700;color:var(--color-navy,var(--color-text));position:relative;z-index:1}',

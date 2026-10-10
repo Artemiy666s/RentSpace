@@ -14,10 +14,52 @@ function rrSplitRender(e){
     () => ["n", "tenant", "contract", "area", "indicator", ...r.flatMap((y) => ["m" + y + "c", "m" + y + "p"]), "debt"],
     [r]
   );
+  const gKey = g.join("|");
+  const MIN_COL = 36;
+  const DEF = { n: 48, tenant: 260, contract: 180, area: 110, indicator: 100, debt: 120 };
+  const defW = (key) => (String(key).startsWith("m") ? 96 : DEF[key] ?? 80);
+
+  const fitToWidth = (keys, base, target) => {
+    const out = {};
+    if (!(target > 0) || !keys.length) {
+      for (const key of keys) out[key] = defW(key);
+      return out;
+    }
+    const weightSum = keys.reduce((sum, key) => sum + Math.max(1, base[key] || defW(key)), 0) || 1;
+    let used = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (i === keys.length - 1) {
+        out[key] = Math.max(MIN_COL, target - used);
+      } else {
+        const w = Math.max(MIN_COL, Math.round(((base[key] || defW(key)) / weightSum) * target));
+        out[key] = w;
+        used += w;
+      }
+    }
+    let total = keys.reduce((sum, key) => sum + out[key], 0);
+    if (total > target) {
+      const scale = target / total;
+      used = 0;
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (i === keys.length - 1) out[key] = Math.max(MIN_COL, target - used);
+        else {
+          out[key] = Math.max(MIN_COL, Math.round(out[key] * scale));
+          used += out[key];
+        }
+      }
+      total = keys.reduce((sum, key) => sum + out[key], 0);
+      if (total !== target) out[keys[keys.length - 1]] = Math.max(MIN_COL, out[keys[keys.length - 1]] + (target - total));
+    } else if (total < target) {
+      out[keys[keys.length - 1]] += target - total;
+    }
+    return out;
+  };
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v7");
+      const y = localStorage.getItem("rr-split-cols-v8");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -31,8 +73,36 @@ function rrSplitRender(e){
     return 28;
   });
 
+  const wrapRef = A.useRef(null);
   const dragRef = A.useRef(null);
+  const [containerW, setContainerW] = A.useState(0);
   const [guideX, setGuideX] = A.useState(null);
+
+  A.useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setContainerW(Math.max(0, Math.floor(el.clientWidth)));
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  A.useEffect(() => {
+    if (!(containerW > 0)) return;
+    w((prev) => {
+      const base = Object.fromEntries(
+        g.map((key) => [key, Number(prev[key]) > 0 ? Number(prev[key]) : defW(key)])
+      );
+      const next = fitToWidth(g, base, containerW);
+      const same = g.every((key) => prev[key] === next[key]);
+      return same ? prev : next;
+    });
+  }, [containerW, gKey]);
 
   const k = A.useCallback(() => {
     const y = x;
@@ -76,33 +146,47 @@ function rrSplitRender(e){
     [a]
   );
 
-  const O = { n: 44, tenant: 190, contract: 140, area: 96, indicator: 78, debt: 104 };
-  const T = (y) => b[y] ?? (String(y).startsWith("m") ? 72 : O[y] ?? 80);
-  const tableWidth = g.reduce((sum, key) => sum + T(key), 0);
+  const T = (y) => {
+    const n = Number(b[y]);
+    return Number.isFinite(n) && n > 0 ? n : defW(y);
+  };
   const M = r.length ? 5 + r.length * 2 + 1 : 6;
 
   const cls = (...parts) => parts.filter(Boolean).join(" ");
 
+  const persistCols = (next) => {
+    try {
+      localStorage.setItem("rr-split-cols-v8", JSON.stringify(next));
+    } catch {}
+    return next;
+  };
+
   const S = (key) => (evt) => {
+    const idx = g.indexOf(key);
+    const neighbor = g[idx + 1];
+    if (!neighbor || !(containerW > 0)) return;
     evt.preventDefault();
     evt.stopPropagation();
     const startX = evt.clientX;
     const startW = T(key);
-    dragRef.current = { key, startX, startW };
+    const startN = T(neighbor);
+    const pair = startW + startN;
+    const snap = Object.fromEntries(g.map((colKey) => [colKey, T(colKey)]));
+    const wrapRect = wrapRef.current ? wrapRef.current.getBoundingClientRect() : null;
+    dragRef.current = { key, neighbor, startX, startW, startN, pair, snap };
     setGuideX(startX);
 
     const onMove = (ev) => {
       const drag = dragRef.current;
       if (!drag) return;
-      const next = Math.max(16, Math.round(drag.startW + (ev.clientX - drag.startX)));
-      setGuideX(ev.clientX);
-      w((prev) => {
-        // Lock every column to an explicit px width so the browser cannot
-        // redistribute space into neighbours while one column is resized.
-        const locked = {};
-        for (const colKey of g) locked[colKey] = prev[colKey] ?? (String(colKey).startsWith("m") ? 72 : O[colKey] ?? 80);
-        if (locked[drag.key] === next) return prev;
-        locked[drag.key] = next;
+      let nextW = Math.round(drag.startW + (ev.clientX - drag.startX));
+      nextW = Math.max(MIN_COL, Math.min(drag.pair - MIN_COL, nextW));
+      const nextN = drag.pair - nextW;
+      let gx = ev.clientX;
+      if (wrapRect) gx = Math.max(wrapRect.left + 2, Math.min(wrapRect.right - 2, gx));
+      setGuideX(gx);
+      w(() => {
+        const locked = { ...drag.snap, [drag.key]: nextW, [drag.neighbor]: nextN };
         return locked;
       });
     };
@@ -114,12 +198,7 @@ function rrSplitRender(e){
       document.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      w((prev) => {
-        try {
-          localStorage.setItem("rr-split-cols-v7", JSON.stringify(prev));
-        } catch {}
-        return prev;
-      });
+      w((prev) => persistCols(prev));
     };
 
     document.body.style.cursor = "col-resize";
@@ -128,7 +207,7 @@ function rrSplitRender(e){
     document.addEventListener("mouseup", onUp);
   };
 
-  const th = (key, className, label, align) =>
+  const th = (key, className, label, align, noResize) =>
     u.jsxs("th", {
       rowSpan: 2,
       className: cls(className, d.thResizable),
@@ -144,12 +223,14 @@ function rrSplitRender(e){
           onClick: () => m && m(key),
           children: label,
         }),
-        u.jsx("span", {
-          className: d.colResizeHandle,
-          role: "separator",
-          "aria-orientation": "vertical",
-          onMouseDown: S(key),
-        }),
+        noResize
+          ? null
+          : u.jsx("span", {
+              className: d.colResizeHandle,
+              role: "separator",
+              "aria-orientation": "vertical",
+              onMouseDown: S(key),
+            }),
       ],
     });
 
@@ -238,6 +319,7 @@ function rrSplitRender(e){
       : [];
 
   return u.jsxs("div", {
+    ref: wrapRef,
     className: d.splitWrap,
     children: [
       guideX == null
@@ -259,9 +341,10 @@ function rrSplitRender(e){
         className: cls(d.splitTable, d.splitTableFixed),
         style: {
           "--rr-row-h": x + "px",
-          width: tableWidth,
-          minWidth: tableWidth,
-          maxWidth: tableWidth,
+          width: "100%",
+          minWidth: "100%",
+          maxWidth: "100%",
+          tableLayout: "fixed",
         },
         children: [
           u.jsx("colgroup", {
@@ -270,7 +353,7 @@ function rrSplitRender(e){
                 "col",
                 {
                   width: T(y),
-                  style: { width: T(y) + "px", minWidth: T(y) + "px", maxWidth: T(y) + "px" },
+                  style: { width: T(y) + "px" },
                 },
                 y
               )
@@ -321,7 +404,7 @@ function rrSplitRender(e){
                       y
                     )
                   ),
-                  th("debt", d.numCell, n("common.debt"), "right"),
+                  th("debt", d.numCell, n("common.debt"), "right", true),
                 ],
               }),
               u.jsx("tr", {
