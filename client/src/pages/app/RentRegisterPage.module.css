@@ -213,14 +213,11 @@
   background: var(--color-table-head, #f7f9fc);
   font-weight: 700;
   color: var(--color-navy, var(--color-text));
-  position: sticky;
-  top: 0;
-  z-index: 3;
+  position: relative;
+  z-index: 1;
 }
 
 .splitTable thead tr:nth-child(2) th {
-  top: var(--rr-row-h, 28px);
-  z-index: 2;
   font-size: 11px;
   background: var(--color-table-head, #f7f9fc);
 }
@@ -295,14 +292,12 @@
 }
 
 .tenantCell {
-  max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
 }
 
 .contractCell {
-  max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--color-muted);

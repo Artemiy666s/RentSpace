@@ -17,7 +17,7 @@ function rrSplitRender(e){
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v4");
+      const y = localStorage.getItem("rr-split-cols-v5");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -122,7 +122,7 @@ function rrSplitRender(e){
     const onMove = (ev) => {
       const drag = dragRef.current;
       if (!drag) return;
-      const next = Math.max(52, Math.min(560, Math.round(drag.startW + (ev.clientX - drag.startX))));
+      const next = Math.max(16, Math.round(drag.startW + (ev.clientX - drag.startX)));
       setGuideX(ev.clientX);
       w((prev) => (prev[drag.key] === next ? prev : { ...prev, [drag.key]: next }));
     };
@@ -136,7 +136,7 @@ function rrSplitRender(e){
       document.body.style.userSelect = "";
       w((prev) => {
         try {
-          localStorage.setItem("rr-split-cols-v4", JSON.stringify(prev));
+          localStorage.setItem("rr-split-cols-v5", JSON.stringify(prev));
         } catch {}
         return prev;
       });
@@ -154,7 +154,6 @@ function rrSplitRender(e){
       className: cls(className, d.thResizable),
       style: {
         width: T(key),
-        minWidth: T(key),
         position: "relative",
         textAlign: align || "left",
       },
@@ -302,7 +301,6 @@ function rrSplitRender(e){
                     className: cls(d.indicatorCol, d.thResizable),
                     style: {
                       width: T("indicator"),
-                      minWidth: T("indicator"),
                       position: "relative",
                     },
                     children: [
@@ -348,7 +346,6 @@ function rrSplitRender(e){
                           className: cls(d.subCol, d.thResizable),
                           style: {
                             width: T("m" + y + "c"),
-                            minWidth: T("m" + y + "c"),
                             position: "relative",
                           },
                           children: [
@@ -370,7 +367,6 @@ function rrSplitRender(e){
                           className: cls(d.subCol, d.thResizable),
                           style: {
                             width: T("m" + y + "p"),
-                            minWidth: T("m" + y + "p"),
                             position: "relative",
                           },
                           children: [
