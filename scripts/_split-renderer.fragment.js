@@ -214,7 +214,7 @@ function rrSplitRender(e){
       style: {
         width: T(key),
         position: "relative",
-        textAlign: align || "left",
+        textAlign: align || "center",
       },
       children: [
         u.jsx("button", {
@@ -366,7 +366,7 @@ function rrSplitRender(e){
                   th("n", d.numCol, "№", "center"),
                   th("tenant", null, n("rentRegister.colTenant")),
                   th("contract", null, n("rentRegister.colContract")),
-                  th("area", d.numCell, n("rentRegister.colArea"), "right"),
+                  th("area", d.numCell, n("rentRegister.colArea"), "center"),
                   u.jsxs("th", {
                     rowSpan: 2,
                     className: cls(d.indicatorCol, d.thResizable),
@@ -404,7 +404,7 @@ function rrSplitRender(e){
                       y
                     )
                   ),
-                  th("debt", d.numCell, n("common.debt"), "right", true),
+                  th("debt", d.numCell, n("common.debt"), "center", true),
                 ],
               }),
               u.jsx("tr", {

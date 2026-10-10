@@ -201,6 +201,7 @@
   border-right: 1px solid rgba(6, 27, 51, 0.06);
   padding: 4px 8px;
   vertical-align: middle;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -233,7 +234,7 @@
 }
 
 .subCol {
-  text-align: right !important;
+  text-align: center !important;
   font-weight: 600;
   color: var(--color-muted);
   border-left: 1px solid var(--color-border);
@@ -244,9 +245,11 @@
 .indicatorCol {
   min-width: 72px;
   width: 78px;
+  text-align: center !important;
 }
 
 .indicatorCell {
+  text-align: center !important;
   font-weight: 600;
   color: var(--color-navy, var(--color-text));
   background: rgba(18, 103, 232, 0.05);
@@ -258,7 +261,7 @@
 }
 
 .numCell {
-  text-align: right !important;
+  text-align: center !important;
   font-variant-numeric: tabular-nums;
 }
 
@@ -280,6 +283,7 @@
 }
 
 .totalLabel {
+  text-align: center !important;
   font-weight: 800;
 }
 
@@ -295,12 +299,14 @@
 }
 
 .tenantCell {
+  text-align: center !important;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
 }
 
 .contractCell {
+  text-align: center !important;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--color-muted);
@@ -308,12 +314,14 @@
 }
 
 .debtCell {
+  text-align: center !important;
   font-weight: 700;
   border-left: 1px solid var(--color-border);
 }
 
 .thResizable {
   position: relative;
+  text-align: center !important;
 }
 
 .colResizeHandle {
@@ -348,12 +356,14 @@
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   width: 100%;
   box-sizing: border-box;
   font: inherit;
   font-weight: 700;
   color: inherit;
+  text-align: center;
 }
 
 .splitSortBtn:hover {
