@@ -1,6 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
 const { lastDueRentYm, ensureDueRentCharges } = require('./chargeService');
+const { maxDueRentMonth } = require('../utils/billingPeriod');
 const { cacheWrap, cacheDelPrefix } = require('../utils/ttlCache');
 
 const MONTH_NAMES = [
@@ -225,12 +226,17 @@ async function listTenantsTable(query, orgId) {
 
 async function computeContractsDebt(propertyId, year, contractIds) {
   if (!contractIds.length) return {};
+  const dueThrough = maxDueRentMonth(year);
+  if (dueThrough <= 0) {
+    return Object.fromEntries(contractIds.map((id) => [id, 0]));
+  }
 
-  // Все начисления аренды, уже попавшие в реестр (не только «календарно due») − оплаты за год.
+  // Только месяцы, по которым счета уже должны быть выставлены (не будущее).
   const rentRows = await db('rent_charges')
     .where({ property_id: propertyId, period_year: year })
     .whereNot('status', 'cancelled')
     .whereIn('contract_id', contractIds)
+    .where('period_month', '<=', dueThrough)
     .groupBy('contract_id')
     .sum('amount_with_vat as total')
     .select('contract_id');
@@ -558,7 +564,7 @@ async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
   const ensureCharges = options.ensureCharges !== false;
   // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
-  const cacheKey = `rent-register:v3:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
+  const cacheKey = `rent-register:v4:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
@@ -568,10 +574,13 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:${propertyId}:`);
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v4:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v2:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
     cacheDelPrefix('dashboard:v1:');
+    cacheDelPrefix('dashboard:v2:');
   }
 }
 
@@ -669,10 +678,13 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     utilPaidMap[key] = Number(row.total);
   }
 
+  const dueThrough = maxDueRentMonth(year);
+
   return links.map((row, idx) => {
     const months = {};
     let totalRent = 0;
     let totalUtil = 0;
+    let dueRent = 0;
     for (let m = 1; m <= 12; m++) {
       const rk = `${row.contract_id}-${m}`;
       months[m] = {
@@ -683,11 +695,11 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
+      // В долг — только уже наступившие месяцы (с 10-го числа). Ноябрь/декабрь до срока не входят.
+      if (m <= dueThrough) dueRent += months[m].rent;
     }
     const paid = paidMap[row.contract_id] || 0;
-    // Задолженность = сумма начислений аренды, уже стоящих в реестре − оплаты аренды за год.
-    // Если месяц виден в «Нач.» — он входит в долг (не отсекаем по календарю 15-го).
-    const debt = Math.max(0, totalRent - paid);
+    const debt = Math.max(0, dueRent - paid);
     const contractNumber = row.contract_number || '';
     const contractDate = toDateInput(row.contract_date);
     const endDate = toDateInput(row.end_date);

@@ -3,7 +3,7 @@ const { db } = require('../db');
 const { calcRentAmount } = require('../utils/rent');
 const { CHARGE_DAY, nowInMinsk } = require('../utils/billingPeriod');
 
-/** Последний месяц, за который аренда уже должна быть начислена (Europe/Minsk, после 15-го). */
+/** Последний месяц, за который аренда уже должна быть начислена (Europe/Minsk, с 10-го). */
 function lastDueRentYm(asOf = new Date()) {
   const now = nowInMinsk(asOf);
   let year = now.year;
