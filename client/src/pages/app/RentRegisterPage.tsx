@@ -58,7 +58,24 @@ export function RentRegisterPage() {
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() => defaultVisibleMonths());
   const [selectedRow, setSelectedRow] = useState<RegisterRow | null>(null);
   const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('classic');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      const saved = localStorage.getItem('rr-view-mode');
+      if (saved === 'split' || saved === 'classic') return saved;
+    } catch {
+      /* ignore */
+    }
+    return 'classic';
+  });
+
+  const selectViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('rr-view-mode', mode);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const { data: properties } = useQuery({
     queryKey: ['properties'],
@@ -405,14 +422,14 @@ export function RentRegisterPage() {
           <button
             type="button"
             className={`${styles.viewBtn} ${viewMode === 'classic' ? styles.viewBtnActive : ''}`}
-            onClick={() => setViewMode('classic')}
+            onClick={() => selectViewMode('classic')}
           >
             {t('rentRegister.viewClassic')}
           </button>
           <button
             type="button"
             className={`${styles.viewBtn} ${viewMode === 'split' ? styles.viewBtnActive : ''}`}
-            onClick={() => setViewMode('split')}
+            onClick={() => selectViewMode('split')}
           >
             {t('rentRegister.viewSplit')}
           </button>
