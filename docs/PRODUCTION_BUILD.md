@@ -8,7 +8,7 @@ This repository keeps the **exact frontend currently deployed** on Vercel (`rent
 - `server/public/` — same files, served locally and by Vercel
 
 Production JS: `assets/index-DGrUP6as.js`  
-SHA-256: `A9D51FE783B203474DD3F1863A4EB24418744B6A9741C32A85B785839CCBCAE7`
+SHA-256: `8CD3ED5CD797C5D13B8BA08F997052A4AD3115EB2E1915BFF19C49E50C825776`
 
 ## Local run (matches production UI)
 

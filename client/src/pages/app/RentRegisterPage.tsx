@@ -34,7 +34,13 @@ type ViewMode = 'classic' | 'split';
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 function defaultVisibleMonths(date = new Date()): number[] {
-  return [date.getMonth() + 1];
+  const current = date.getMonth() + 1;
+  const months: number[] = [];
+  for (let i = 2; i >= 0; i -= 1) {
+    const month = current - i;
+    if (month >= 1) months.push(month);
+  }
+  return months;
 }
 
 function matchesSearch(row: RegisterRow, query: string): boolean {

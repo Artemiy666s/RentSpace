@@ -90,6 +90,14 @@ function minifyFragment(src) {
 }
 
 function patchJs(js) {
+  const defaultMonthsNew =
+    'function hve(e=new Date){const t=e.getMonth()+1,n=[];for(let r=2;r>=0;r--){const a=t-r;if(a>=1)n.push(a)}return n}';
+  if (js.includes('function hve(e=new Date){return[e.getMonth()+1]}')) {
+    js = js.replace('function hve(e=new Date){return[e.getMonth()+1]}', defaultMonthsNew);
+  } else if (!js.includes('function hve(e=new Date){const t=e.getMonth()+1,n=[];for(let r=2;r>=0;r--)')) {
+    throw new Error('hve default months needle not found');
+  }
+
   const frag = minifyFragment(
     fs.readFileSync(path.join(__dirname, '_split-renderer.fragment.js'), 'utf8')
   );
