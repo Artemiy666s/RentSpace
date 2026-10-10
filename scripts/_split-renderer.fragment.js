@@ -17,7 +17,7 @@ function rrSplitRender(e){
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v6");
+      const y = localStorage.getItem("rr-split-cols-v7");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -96,7 +96,15 @@ function rrSplitRender(e){
       if (!drag) return;
       const next = Math.max(16, Math.round(drag.startW + (ev.clientX - drag.startX)));
       setGuideX(ev.clientX);
-      w((prev) => (prev[drag.key] === next ? prev : { ...prev, [drag.key]: next }));
+      w((prev) => {
+        // Lock every column to an explicit px width so the browser cannot
+        // redistribute space into neighbours while one column is resized.
+        const locked = {};
+        for (const colKey of g) locked[colKey] = prev[colKey] ?? (String(colKey).startsWith("m") ? 72 : O[colKey] ?? 80);
+        if (locked[drag.key] === next) return prev;
+        locked[drag.key] = next;
+        return locked;
+      });
     };
 
     const onUp = () => {
@@ -108,7 +116,7 @@ function rrSplitRender(e){
       document.body.style.userSelect = "";
       w((prev) => {
         try {
-          localStorage.setItem("rr-split-cols-v6", JSON.stringify(prev));
+          localStorage.setItem("rr-split-cols-v7", JSON.stringify(prev));
         } catch {}
         return prev;
       });
@@ -155,10 +163,10 @@ function rrSplitRender(e){
               u.jsx("td", { rowSpan: 2, className: d.numCol }),
               u.jsx("td", {
                 rowSpan: 2,
-                colSpan: 2,
                 className: d.totalLabel,
                 children: n("rentRegister.totalRow"),
               }),
+              u.jsx("td", { rowSpan: 2, className: d.contractCell, children: "\u00a0" }),
               u.jsxs("td", {
                 rowSpan: 2,
                 className: d.numCell,
@@ -258,7 +266,14 @@ function rrSplitRender(e){
         children: [
           u.jsx("colgroup", {
             children: g.map((y) =>
-              u.jsx("col", { style: { width: T(y), minWidth: T(y), maxWidth: T(y) } }, y)
+              u.jsx(
+                "col",
+                {
+                  width: T(y),
+                  style: { width: T(y) + "px", minWidth: T(y) + "px", maxWidth: T(y) + "px" },
+                },
+                y
+              )
             ),
           }),
           u.jsxs("thead", {
@@ -292,7 +307,7 @@ function rrSplitRender(e){
                       {
                         colSpan: 2,
                         className: d.monthGroup,
-                        style: { width: T("m" + y + "c") + T("m" + y + "p"), position: "relative" },
+                        style: { position: "relative" },
                         children: [
                           or(n, y),
                           u.jsx("span", {

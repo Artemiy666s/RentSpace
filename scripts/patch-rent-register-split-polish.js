@@ -43,7 +43,7 @@ const SPLIT_CSS = [
   '._rowResizeBar_ogxkk_921:after{content:"";position:absolute;left:20%;right:20%;top:3px;height:2px;border-radius:1px;background:transparent}',
   '._rowResizeBar_ogxkk_921:hover:after{background:var(--color-blue,#1267e8)}',
   '._emptyCell_ogxkk_922{text-align:center!important;color:var(--color-muted);padding:20px 12px!important;height:auto!important}',
-  '._numCol_ogxkk_923{width:44px;text-align:center!important}',
+  '._numCol_ogxkk_923{text-align:center!important}',
   '._totalLabel_ogxkk_924{font-weight:800}',
 ].join('');
 
