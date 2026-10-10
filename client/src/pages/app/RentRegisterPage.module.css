@@ -189,8 +189,6 @@
 
 .splitTableFixed {
   table-layout: fixed;
-  width: max-content;
-  min-width: 100%;
 }
 
 .splitTable th,
@@ -200,6 +198,8 @@
   padding: 4px 8px;
   vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-height: var(--rr-row-h, 28px);
   height: auto;
   box-sizing: border-box;

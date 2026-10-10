@@ -17,7 +17,7 @@ function rrSplitRender(e){
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v5");
+      const y = localStorage.getItem("rr-split-cols-v6");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -78,6 +78,7 @@ function rrSplitRender(e){
 
   const O = { n: 44, tenant: 190, contract: 140, area: 96, indicator: 78, debt: 104 };
   const T = (y) => b[y] ?? (String(y).startsWith("m") ? 72 : O[y] ?? 80);
+  const tableWidth = g.reduce((sum, key) => sum + T(key), 0);
   const M = r.length ? 5 + r.length * 2 + 1 : 6;
 
   const cls = (...parts) => parts.filter(Boolean).join(" ");
@@ -107,7 +108,7 @@ function rrSplitRender(e){
       document.body.style.userSelect = "";
       w((prev) => {
         try {
-          localStorage.setItem("rr-split-cols-v5", JSON.stringify(prev));
+          localStorage.setItem("rr-split-cols-v6", JSON.stringify(prev));
         } catch {}
         return prev;
       });
@@ -248,10 +249,17 @@ function rrSplitRender(e){
           }),
       u.jsxs("table", {
         className: cls(d.splitTable, d.splitTableFixed),
-        style: { "--rr-row-h": x + "px" },
+        style: {
+          "--rr-row-h": x + "px",
+          width: tableWidth,
+          minWidth: tableWidth,
+          maxWidth: tableWidth,
+        },
         children: [
           u.jsx("colgroup", {
-            children: g.map((y) => u.jsx("col", { style: { width: T(y) } }, y)),
+            children: g.map((y) =>
+              u.jsx("col", { style: { width: T(y), minWidth: T(y), maxWidth: T(y) } }, y)
+            ),
           }),
           u.jsxs("thead", {
             children: [
