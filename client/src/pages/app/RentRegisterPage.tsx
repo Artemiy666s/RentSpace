@@ -215,15 +215,7 @@ export function RentRegisterPage() {
         align: 'right',
         sortable: true,
         sortType: 'number',
-        sortValue: (r) =>
-          Math.round(
-            (Number(r.debt || 0) +
-              Object.values(r.months || {}).reduce(
-                (s, m) => s + Math.max(0, Number(m?.utility || 0) - Number(m?.utilityPaid || 0)),
-                0
-              )) *
-              100
-          ) / 100,
+        sortValue: (r) => r.debt ?? 0,
         render: (r) => fmt(r.debt),
       },
     ];
@@ -252,18 +244,10 @@ export function RentRegisterPage() {
         { rent: 0, paid: 0, utility: 0, utilityPaid: 0 }
       );
     }
-    const utilDebt = (row: RegisterRow) =>
-      Object.values(row.months || {}).reduce((s, m) => {
-        return s + Math.max(0, Number(m?.utility || 0) - Number(m?.utilityPaid || 0));
-      }, 0);
     return {
       monthTotals,
       area: Math.round(filteredRows.reduce((s, r) => s + Number(r.area || 0), 0) * 100) / 100,
-      debt: filteredRows.reduce((s, r) => s + (r.debt ?? 0), 0),
-      combinedDebt:
-        Math.round(
-          filteredRows.reduce((s, r) => s + Number(r.debt || 0) + utilDebt(r), 0) * 100
-        ) / 100,
+      debt: Math.round(filteredRows.reduce((s, r) => s + (r.debt ?? 0), 0) * 100) / 100,
     };
   }, [filteredRows, selectedMonths]);
 
@@ -504,7 +488,7 @@ export function RentRegisterPage() {
                       />
                     ))}
                     <td rowSpan={2} className={`${styles.numCell} ${styles.debtCell}`}>
-                      {fmt(totals.combinedDebt)}
+                      {fmt(totals.debt)}
                     </td>
                   </tr>
                   <tr className={styles.totalRow}>
@@ -595,13 +579,7 @@ function SplitTenantRows({
           <FragmentMonthValues key={`r-${m}`} charged={row.months[m]?.rent} paid={row.months[m]?.paid} />
         ))}
         <td rowSpan={2} className={`${styles.numCell} ${styles.debtCell}`}>
-          {fmt(
-            Number(row.debt || 0) +
-              Object.values(row.months || {}).reduce(
-                (s, m) => s + Math.max(0, Number(m?.utility || 0) - Number(m?.utilityPaid || 0)),
-                0
-              )
-          )}
+          {fmt(row.debt)}
         </td>
       </tr>
       <tr className={`${styles.splitRow} ${styles.splitRowAlt}`} onClick={onClick}>

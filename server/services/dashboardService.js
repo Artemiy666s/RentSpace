@@ -21,7 +21,6 @@ function roundMoney(value) {
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows =
     registerRowsPreloaded || (await listRentRegister(propertyId, year, null, { ensureCharges: false }));
-  const dueThrough = maxDueRentMonth(year);
 
   const monthTotals = {};
   const debtBreakdown = [];
@@ -32,7 +31,8 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
 
     let remaining = registerDebt;
     const months = [];
-    for (let m = dueThrough; m >= 1 && remaining > 0.005; m -= 1) {
+    // Разносим с конца года по месяцам, где есть начисления в реестре.
+    for (let m = 12; m >= 1 && remaining > 0.005; m -= 1) {
       const charged = Number(row.months?.[m]?.rent || 0);
       if (charged <= 0) continue;
       const slice = Math.min(charged, remaining);

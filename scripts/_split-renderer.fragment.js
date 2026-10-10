@@ -67,42 +67,13 @@ function rrSplitRender(e){
     return Number.isFinite(h) ? h.toFixed(2) : "0.00";
   };
 
-  const E = (y) => {
-    let h = 0;
-    const P = y.months || {};
-    for (const O of Object.keys(P)) {
-      const T = P[O];
-      h += Math.max(0, Number((T == null ? void 0 : T.utility) || 0) - Number((T == null ? void 0 : T.utilityPaid) || 0));
-    }
-    return Math.round(h * 100) / 100;
-  };
-
-  const P = (y) => Math.round((Number(y.debt || 0) + E(y)) * 100) / 100;
-
   const totalArea = A.useMemo(
     () => Math.round(a.reduce((y, h) => y + Number(h.area || 0), 0) * 100) / 100,
     [a]
   );
-  const totalDebt = A.useMemo(() => Math.round(a.reduce((y, h) => y + P(h), 0) * 100) / 100, [a]);
-  const totalUtilCharged = A.useMemo(
-    () =>
-      Math.round(
-        r.reduce((y, h) => {
-          var z;
-          return y + Number(((z = c.monthTotals[h]) == null ? void 0 : z.utility) || 0);
-        }, 0) * 100
-      ) / 100,
-    [r, c]
-  );
-  const totalUtilPaid = A.useMemo(
-    () =>
-      Math.round(
-        r.reduce((y, h) => {
-          var z;
-          return y + Number(((z = c.monthTotals[h]) == null ? void 0 : z.utilityPaid) || 0);
-        }, 0) * 100
-      ) / 100,
-    [r, c]
+  const totalDebt = A.useMemo(
+    () => Math.round(a.reduce((y, h) => y + Number(h.debt || 0), 0) * 100) / 100,
+    [a]
   );
 
   const O = { n: 44, tenant: 190, contract: 140, area: 96, indicator: 78, debt: 104 };
@@ -231,12 +202,6 @@ function rrSplitRender(e){
             children: [
               u.jsx("td", {
                 className: d.indicatorCell,
-                title:
-                  n("rentRegister.indicatorUtil") +
-                  ": " +
-                  j(totalUtilCharged) +
-                  " / " +
-                  j(totalUtilPaid),
                 children: n("rentRegister.indicatorUtil"),
               }),
               r.map((y) => {
@@ -399,7 +364,6 @@ function rrSplitRender(e){
                 : [
                     ...summaryRows,
                     ...a.map((y, h) => {
-                      const N = P(y);
                       return u.jsxs(
                         A.Fragment,
                         {
@@ -458,7 +422,7 @@ function rrSplitRender(e){
                                 u.jsx("td", {
                                   rowSpan: 2,
                                   className: cls(d.numCell, d.debtCell),
-                                  children: j(N),
+                                  children: j(y.debt),
                                 }),
                               ],
                             }),

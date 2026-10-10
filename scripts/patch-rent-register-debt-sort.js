@@ -17,8 +17,8 @@ function sha256(buf) {
 }
 
 function mustReplace(js, from, to, label) {
+  if (js.includes(to)) return js;
   if (!js.includes(from)) throw new Error(`missing: ${label}`);
-  if (js.includes(to) && !js.includes(from)) return js;
   const next = js.replace(from, to);
   if (next === js) throw new Error(`replace failed: ${label}`);
   return next;
@@ -85,15 +85,13 @@ function patch(js) {
     'rent register Cy props'
   );
 
-  // 5) Combined debt for sortValue (matches split-view debt)
-  const debtOld =
-    'key:"debt",title:e("common.debt"),minWidth:"88px",sortable:!0,sortType:"number",sortValue:Q=>Q.debt??0,render:Q=>(Q.debt??0).toFixed(2)}';
-  const debtNew =
+  // 5) Keep debt sortValue = API rent debt (same as classic column)
+  const debtCombined =
     'key:"debt",title:e("common.debt"),minWidth:"88px",sortable:!0,sortType:"number",sortValue:Q=>Math.round((Number(Q.debt||0)+Object.values(Q.months||{}).reduce((s,m)=>s+Math.max(0,Number((m==null?void 0:m.utility)||0)-Number((m==null?void 0:m.utilityPaid)||0)),0))*100)/100,render:Q=>(Q.debt??0).toFixed(2)}';
-  if (js.includes(debtNew)) {
-    console.log('debt sortValue already patched');
-  } else {
-    js = mustReplace(js, debtOld, debtNew, 'debt sortValue');
+  const debtSimple =
+    'key:"debt",title:e("common.debt"),minWidth:"88px",sortable:!0,sortType:"number",sortValue:Q=>Q.debt??0,render:Q=>(Q.debt??0).toFixed(2)}';
+  if (js.includes(debtCombined)) {
+    js = mustReplace(js, debtCombined, debtSimple, 'debt sortValue revert to API debt');
   }
 
   return js;
