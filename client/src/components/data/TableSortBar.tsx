@@ -10,6 +10,7 @@ interface Props {
   className?: string;
   showNamePresets?: boolean;
   showDatePresets?: boolean;
+  showDebtPresets?: boolean;
   /** Без подписи над полем — для компактной панели фильтров */
   inline?: boolean;
 }
@@ -20,6 +21,7 @@ export function TableSortBar({
   className = '',
   showNamePresets = true,
   showDatePresets = true,
+  showDebtPresets = false,
   inline = false,
 }: Props) {
   const { t } = useI18n();
@@ -38,8 +40,14 @@ export function TableSortBar({
         { value: 'nameDesc', label: t('tableSort.nameDesc') }
       );
     }
+    if (showDebtPresets) {
+      list.push(
+        { value: 'debtHigh', label: t('tableSort.debtHigh') },
+        { value: 'debtLow', label: t('tableSort.debtLow') }
+      );
+    }
     return list;
-  }, [t, showDatePresets, showNamePresets]);
+  }, [t, showDatePresets, showNamePresets, showDebtPresets]);
 
   return (
     <Select

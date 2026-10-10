@@ -8,6 +8,8 @@ export const en: TranslationTree = {
     oldest: 'Oldest first',
     nameAsc: 'Name A→Z',
     nameDesc: 'Name Z→A',
+    debtHigh: 'By debt high → low',
+    debtLow: 'By debt low → high',
     columnHint: 'Click a column header to sort ascending or descending',
   },
   validation: {

@@ -2,13 +2,21 @@ import { useCallback, useMemo, useState } from 'react';
 import type { SortDirection } from '@/components/data/DataTable';
 import { sortRows, type SortAccessor } from '@/lib/tableSort';
 
-export type SortPresetId = 'default' | 'newest' | 'oldest' | 'nameAsc' | 'nameDesc';
+export type SortPresetId =
+  | 'default'
+  | 'newest'
+  | 'oldest'
+  | 'nameAsc'
+  | 'nameDesc'
+  | 'debtHigh'
+  | 'debtLow';
 
 export interface UseTableSortOptions {
   defaultSortKey?: string | null;
   defaultDirection?: SortDirection;
   dateKey?: string;
   nameKey?: string;
+  debtKey?: string;
 }
 
 export function useTableSort<T>(
@@ -36,6 +44,7 @@ export function useTableSort<T>(
     (preset: SortPresetId) => {
       const dateKey = options.dateKey;
       const nameKey = options.nameKey;
+      const debtKey = options.debtKey;
 
       switch (preset) {
         case 'default':
@@ -66,11 +75,23 @@ export function useTableSort<T>(
             setSortDirection('desc');
           }
           break;
+        case 'debtHigh':
+          if (debtKey && accessors[debtKey]) {
+            setSortKey(debtKey);
+            setSortDirection('desc');
+          }
+          break;
+        case 'debtLow':
+          if (debtKey && accessors[debtKey]) {
+            setSortKey(debtKey);
+            setSortDirection('asc');
+          }
+          break;
         default:
           break;
       }
     },
-    [accessors, options.dateKey, options.nameKey]
+    [accessors, options.dateKey, options.nameKey, options.debtKey]
   );
 
   const sortedRows = useMemo(
@@ -82,12 +103,15 @@ export function useTableSort<T>(
     if (!sortKey) return 'default';
     const dateKey = options.dateKey;
     const nameKey = options.nameKey;
+    const debtKey = options.debtKey;
     if (dateKey && sortKey === dateKey && sortDirection === 'desc') return 'newest';
     if (dateKey && sortKey === dateKey && sortDirection === 'asc') return 'oldest';
     if (nameKey && sortKey === nameKey && sortDirection === 'asc') return 'nameAsc';
     if (nameKey && sortKey === nameKey && sortDirection === 'desc') return 'nameDesc';
+    if (debtKey && sortKey === debtKey && sortDirection === 'desc') return 'debtHigh';
+    if (debtKey && sortKey === debtKey && sortDirection === 'asc') return 'debtLow';
     return 'default';
-  }, [sortKey, sortDirection, options.dateKey, options.nameKey]);
+  }, [sortKey, sortDirection, options.dateKey, options.nameKey, options.debtKey]);
 
   return {
     sortedRows,

@@ -8,6 +8,8 @@ export const be: TranslationTree = {
     oldest: 'Спачатку старыя',
     nameAsc: 'Па назве А→Я',
     nameDesc: 'Па назве Я→А',
+    debtHigh: 'Па запазычанасці вышэй → ніжэй',
+    debtLow: 'Па запазычанасці ніжэй → вышэй',
     columnHint: 'Націсніце загаловак слупка для сартавання',
   },
   validation: {

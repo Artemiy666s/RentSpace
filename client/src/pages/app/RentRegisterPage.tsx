@@ -215,7 +215,15 @@ export function RentRegisterPage() {
         align: 'right',
         sortable: true,
         sortType: 'number',
-        sortValue: (r) => r.debt ?? 0,
+        sortValue: (r) =>
+          Math.round(
+            (Number(r.debt || 0) +
+              Object.values(r.months || {}).reduce(
+                (s, m) => s + Math.max(0, Number(m?.utility || 0) - Number(m?.utilityPaid || 0)),
+                0
+              )) *
+              100
+          ) / 100,
         render: (r) => fmt(r.debt),
       },
     ];
@@ -227,7 +235,7 @@ export function RentRegisterPage() {
   const { sortedRows, sortKey, sortDirection, handleSort, applyPreset, activePreset } = useTableSort(
     filteredRows,
     accessors,
-    { nameKey: 'tenant' }
+    { nameKey: 'tenant', debtKey: 'debt' }
   );
 
   const totals = useMemo(() => {
@@ -425,7 +433,12 @@ export function RentRegisterPage() {
             {t('rentRegister.viewSplit')}
           </button>
         </div>
-        <TableSortBar value={activePreset} onChange={applyPreset} showDatePresets={false} />
+        <TableSortBar
+          value={activePreset}
+          onChange={applyPreset}
+          showDatePresets={false}
+          showDebtPresets
+        />
       </div>
       <p className={listingStyles.sortHint}>{t('tableSort.columnHint')}</p>
 
