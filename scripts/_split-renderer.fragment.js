@@ -140,6 +140,7 @@ function rrSplitRender(e){
 
   const th = (key, className, label, align) =>
     u.jsxs("th", {
+      rowSpan: 2,
       className: cls(className, d.thResizable),
       style: {
         width: T(key),
@@ -273,6 +274,7 @@ function rrSplitRender(e){
                   th("contract", null, n("rentRegister.colContract")),
                   th("area", d.numCell, n("rentRegister.colArea"), "right"),
                   u.jsxs("th", {
+                    rowSpan: 2,
                     className: cls(d.indicatorCol, d.thResizable),
                     style: {
                       width: T("indicator"),

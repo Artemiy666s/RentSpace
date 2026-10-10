@@ -200,8 +200,13 @@
   padding: 4px 8px;
   vertical-align: middle;
   white-space: nowrap;
-  height: var(--rr-row-h, 28px);
+  min-height: var(--rr-row-h, 28px);
+  height: auto;
   box-sizing: border-box;
+}
+
+.splitTable tbody td:not([rowspan]) {
+  height: var(--rr-row-h, 28px);
 }
 
 .splitTable thead th {
@@ -210,13 +215,14 @@
   color: var(--color-navy, var(--color-text));
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 3;
 }
 
 .splitTable thead tr:nth-child(2) th {
   top: var(--rr-row-h, 28px);
-  z-index: 1;
+  z-index: 2;
   font-size: 11px;
+  background: var(--color-table-head, #f7f9fc);
 }
 
 .monthGroup {
