@@ -15,9 +15,13 @@ function rrSplitRender(e){
     [r]
   );
   const gKey = g.join("|");
-  const MIN_COL = 36;
-  const DEF = { n: 48, tenant: 260, contract: 180, area: 110, indicator: 100, debt: 120 };
-  const defW = (key) => (String(key).startsWith("m") ? 96 : DEF[key] ?? 80);
+  const MIN_COL = 40;
+  // Default proportions for a filled-width table with 3 months:
+  // narrow № / wide tenant / medium contract+area / compact indicator /
+  // equal month Нач·Опл (~8 digits) / debt ≈ one month subcolumn.
+  const DEF = { n: 44, tenant: 300, contract: 170, area: 120, indicator: 88, debt: 108 };
+  const DEF_MONTH = 102;
+  const defW = (key) => (String(key).startsWith("m") ? DEF_MONTH : DEF[key] ?? 80);
 
   const fitToWidth = (keys, base, target) => {
     const out = {};
@@ -59,7 +63,7 @@ function rrSplitRender(e){
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v8");
+      const y = localStorage.getItem("rr-split-cols-v9");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -156,7 +160,7 @@ function rrSplitRender(e){
 
   const persistCols = (next) => {
     try {
-      localStorage.setItem("rr-split-cols-v8", JSON.stringify(next));
+      localStorage.setItem("rr-split-cols-v9", JSON.stringify(next));
     } catch {}
     return next;
   };
