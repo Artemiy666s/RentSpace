@@ -35,7 +35,8 @@ const PLAN_META_COLUMNS = [
 
 /** In-memory blob cache so warm instances don't re-fetch ~1MB PNG from TiDB every time. */
 const PLAN_BLOB_CACHE = new Map();
-const PLAN_BLOB_CACHE_MAX = 24;
+/** ~несколько этажей + property plan на тёплом инстансе; браузер всё равно кэширует immutable URL. */
+const PLAN_BLOB_CACHE_MAX = 48;
 const PLAN_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 router.use(authenticate, requireOrgAccess());

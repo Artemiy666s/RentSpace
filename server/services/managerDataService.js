@@ -551,11 +551,21 @@ function toDateInput(value) {
   return formatted === 'Invalid Date' ? null : formatted;
 }
 
-async function listRentRegister(propertyId, year, buildingId) {
+/**
+ * @param {number} propertyId
+ * @param {number} year
+ * @param {number|null|undefined} buildingId
+ * @param {{ ensureCharges?: boolean }} [options]
+ *   ensureCharges — дописывать начисления перед чтением (по умолчанию true).
+ *   На дашборде ставим false: иначе каждый заход на главную ждёт ensureDueRentCharges.
+ */
+async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
-  const cacheKey = `rent-register:v3:${propertyId}:${year}:${bid || 'all'}`;
+  const ensureCharges = options.ensureCharges !== false;
+  // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
+  const cacheKey = `rent-register:v3:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
-  return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid));
+  return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
 
 function invalidateRentRegisterCache(propertyId) {
@@ -563,14 +573,17 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:${propertyId}:`);
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v1:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
+    cacheDelPrefix('dashboard:v1:');
   }
 }
 
-async function loadRentRegister(propertyId, year, bid) {
+async function loadRentRegister(propertyId, year, bid, options = {}) {
+  const ensureCharges = options.ensureCharges !== false;
   const property = await db('properties').where({ id: propertyId }).first();
-  if (property?.organization_id) {
+  if (ensureCharges && property?.organization_id) {
     await ensureDueRentCharges({
       organizationId: property.organization_id,
       propertyId,

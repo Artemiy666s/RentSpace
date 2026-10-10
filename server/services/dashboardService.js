@@ -4,6 +4,9 @@ const { getMonthReadinessLite } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
 const { maxDueRentMonth, maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
 const { roomRentableArea, isOccupiedForArea, sumRentableArea } = require('../utils/rentableArea');
+const { cacheWrap } = require('../utils/ttlCache');
+
+const DASHBOARD_TTL_MS = 30_000;
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -16,7 +19,8 @@ function roundMoney(value) {
  * чтобы уже закрытые (апр/май) не всплывали из‑за рассинхрона period_month у платежей.
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
-  const registerRows = registerRowsPreloaded || (await listRentRegister(propertyId, year));
+  const registerRows =
+    registerRowsPreloaded || (await listRentRegister(propertyId, year, null, { ensureCharges: false }));
   const dueThrough = maxDueRentMonth(year);
 
   const monthTotals = {};
@@ -135,54 +139,56 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
   const today = dayjs().format('YYYY-MM-DD');
   const in60 = dayjs().add(60, 'day').format('YYYY-MM-DD');
 
-  const [roomsWithFloor, registerRows, expensesByMonth, expiring, debtors] = await Promise.all([
-    db('rooms as r')
-      .leftJoin('buildings as b', 'b.id', 'r.building_id')
-      .leftJoin('floors as f', 'f.id', 'r.floor_id')
-      .where('r.property_id', propertyId)
-      .whereNull('r.deleted_at')
-      .select(
-        'r.id',
-        'r.room_number',
-        'r.name',
-        'r.area',
-        'r.rentable_area',
-        'r.status',
-        'r.room_type',
-        'r.building_id',
-        'r.floor_id',
-        'b.name as building_name',
-        'f.name as floor_name',
-        'f.level_number',
-        'f.id as floor_pk'
-      ),
-    listRentRegister(propertyId, year),
-    db('expenses')
-      .where({ property_id: propertyId, period_year: year })
-      .groupBy('period_month')
-      .sum('amount as total')
-      .select('period_month'),
-    db('contracts')
-      .where({ property_id: propertyId, status: 'active' })
-      .where('end_date', '<=', in60)
-      .where('end_date', '>=', today)
-      .limit(10),
-    organizationId
-      ? db('tenants').where({ organization_id: organizationId, status: 'debtor' }).limit(10)
-      : Promise.resolve([]),
-  ]);
+  const asOf = today;
+  const [roomsWithFloor, registerRows, expensesByMonth, expiring, debtors, leasedIds] =
+    await Promise.all([
+      db('rooms as r')
+        .leftJoin('buildings as b', 'b.id', 'r.building_id')
+        .leftJoin('floors as f', 'f.id', 'r.floor_id')
+        .where('r.property_id', propertyId)
+        .whereNull('r.deleted_at')
+        .select(
+          'r.id',
+          'r.room_number',
+          'r.name',
+          'r.area',
+          'r.rentable_area',
+          'r.status',
+          'r.room_type',
+          'r.building_id',
+          'r.floor_id',
+          'b.name as building_name',
+          'f.name as floor_name',
+          'f.level_number',
+          'f.id as floor_pk'
+        ),
+      // Дашборд только читает: ensureDueRentCharges — на странице реестра, не здесь.
+      listRentRegister(propertyId, year, null, { ensureCharges: false }),
+      db('expenses')
+        .where({ property_id: propertyId, period_year: year })
+        .groupBy('period_month')
+        .sum('amount as total')
+        .select('period_month'),
+      db('contracts')
+        .where({ property_id: propertyId, status: 'active' })
+        .where('end_date', '<=', in60)
+        .where('end_date', '>=', today)
+        .limit(10),
+      organizationId
+        ? db('tenants').where({ organization_id: organizationId, status: 'debtor' }).limit(10)
+        : Promise.resolve([]),
+      db('contract_rooms as cr')
+        .join('contracts as c', 'c.id', 'cr.contract_id')
+        .where('c.property_id', propertyId)
+        .whereIn('c.status', ['active', 'expiring'])
+        .whereNull('c.deleted_at')
+        .where(function () {
+          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+        })
+        .pluck('cr.room_id'),
+    ]);
 
   const rooms = roomsWithFloor;
-  const asOf = dayjs().format('YYYY-MM-DD');
-  const leasedIds = await db('contract_rooms as cr')
-    .join('contracts as c', 'c.id', 'cr.contract_id')
-    .where('c.property_id', propertyId)
-    .whereIn('c.status', ['active', 'expiring'])
-    .whereNull('c.deleted_at')
-    .where(function () {
-      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-    })
-    .pluck('cr.room_id');
   const leased = new Set(leasedIds.map((id) => Number(id)));
   for (const r of rooms) {
     if (leased.has(Number(r.id)) && !isOccupiedForArea(r.status)) r.status = 'occupied';
@@ -303,94 +309,100 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 }
 
 async function getManagerDashboard(propertyId, organizationId) {
-  const today = dayjs().format('YYYY-MM-DD');
-  const minsk = nowInMinsk();
+  const pid = Number(propertyId);
+  const oid = organizationId == null ? 0 : Number(organizationId);
+  const cacheKey = `dashboard:v1:${pid}:${oid}`;
 
-  const [
-    director,
-    todayPayments,
-    requests,
-    activity,
-    negotiations,
-    debtRooms,
-    expiringSoon,
-    monthReadiness,
-  ] = await Promise.all([
-    buildDirectorAnalytics(propertyId, organizationId),
-    db('payments as p')
-      .leftJoin('tenants as t', 't.id', 'p.tenant_id')
-      .leftJoin('contracts as c', 'c.id', 'p.contract_id')
-      .where({ 'p.property_id': propertyId })
-      .where('p.payment_date', today)
-      .select(
-        'p.id',
-        'p.amount',
-        'p.payment_type',
-        'p.payment_date',
-        't.name as tenant_name',
-        'c.contract_number'
-      )
-      .orderBy('p.amount', 'desc'),
-    db('service_requests')
-      .where({ property_id: propertyId })
-      .whereNot('status', 'closed')
-      .orderBy('created_at', 'desc')
-      .limit(5),
-    db('activity_events')
-      .where({ property_id: propertyId })
-      .orderBy('created_at', 'desc')
-      .limit(15),
-    db('room_negotiations as n')
-      .join('rooms as r', 'r.id', 'n.room_id')
-      .join('buildings as b', 'b.id', 'r.building_id')
-      .join('floors as f', 'f.id', 'r.floor_id')
-      .where('r.property_id', propertyId)
-      .whereNotIn('n.status', ['converted', 'declined'])
-      .select(
-        'n.*',
-        'r.room_number',
-        'r.room_type',
-        'b.name as building_name',
-        'f.name as floor_name',
-        'f.level_number'
-      )
-      .orderBy('n.next_contact_date', 'asc')
-      .limit(8)
-      .catch(() => []),
-    db('rooms as r')
-      .join('buildings as b', 'b.id', 'r.building_id')
-      .join('floors as f', 'f.id', 'r.floor_id')
-      .where({ 'r.property_id': propertyId, 'r.status': 'debt' })
-      .whereNull('r.deleted_at')
-      .select(
-        'r.id',
-        'r.room_number',
-        'r.room_type',
-        'b.name as building_name',
-        'f.name as floor_name',
-        'f.level_number'
-      )
-      .limit(8),
-    db('contracts as c')
-      .join('tenants as t', 't.id', 'c.tenant_id')
-      .where({ 'c.property_id': propertyId, 'c.status': 'active' })
-      .where('c.end_date', '<=', dayjs().add(30, 'day').format('YYYY-MM-DD'))
-      .where('c.end_date', '>=', dayjs().format('YYYY-MM-DD'))
-      .select('c.id', 'c.contract_number', 'c.end_date', 't.name as tenant_name')
-      .limit(8),
-    getMonthReadinessLite(propertyId, minsk.year, minsk.month).catch(() => null),
-  ]);
+  return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
+    const today = dayjs().format('YYYY-MM-DD');
+    const minsk = nowInMinsk();
 
-  return {
-    ...director,
-    todayPayments,
-    serviceRequests: requests,
-    activity,
-    negotiations,
-    debtRooms,
-    expiringSoon,
-    monthReadiness,
-  };
+    const [
+      director,
+      todayPayments,
+      requests,
+      activity,
+      negotiations,
+      debtRooms,
+      expiringSoon,
+      monthReadiness,
+    ] = await Promise.all([
+      buildDirectorAnalytics(pid, organizationId),
+      db('payments as p')
+        .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+        .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+        .where({ 'p.property_id': pid })
+        .where('p.payment_date', today)
+        .select(
+          'p.id',
+          'p.amount',
+          'p.payment_type',
+          'p.payment_date',
+          't.name as tenant_name',
+          'c.contract_number'
+        )
+        .orderBy('p.amount', 'desc'),
+      db('service_requests')
+        .where({ property_id: pid })
+        .whereNot('status', 'closed')
+        .orderBy('created_at', 'desc')
+        .limit(5),
+      db('activity_events')
+        .where({ property_id: pid })
+        .orderBy('created_at', 'desc')
+        .limit(15),
+      db('room_negotiations as n')
+        .join('rooms as r', 'r.id', 'n.room_id')
+        .join('buildings as b', 'b.id', 'r.building_id')
+        .join('floors as f', 'f.id', 'r.floor_id')
+        .where('r.property_id', pid)
+        .whereNotIn('n.status', ['converted', 'declined'])
+        .select(
+          'n.*',
+          'r.room_number',
+          'r.room_type',
+          'b.name as building_name',
+          'f.name as floor_name',
+          'f.level_number'
+        )
+        .orderBy('n.next_contact_date', 'asc')
+        .limit(8)
+        .catch(() => []),
+      db('rooms as r')
+        .join('buildings as b', 'b.id', 'r.building_id')
+        .join('floors as f', 'f.id', 'r.floor_id')
+        .where({ 'r.property_id': pid, 'r.status': 'debt' })
+        .whereNull('r.deleted_at')
+        .select(
+          'r.id',
+          'r.room_number',
+          'r.room_type',
+          'b.name as building_name',
+          'f.name as floor_name',
+          'f.level_number'
+        )
+        .limit(8),
+      db('contracts as c')
+        .join('tenants as t', 't.id', 'c.tenant_id')
+        .where({ 'c.property_id': pid, 'c.status': 'active' })
+        .where('c.end_date', '<=', dayjs().add(30, 'day').format('YYYY-MM-DD'))
+        .where('c.end_date', '>=', dayjs().format('YYYY-MM-DD'))
+        .select('c.id', 'c.contract_number', 'c.end_date', 't.name as tenant_name')
+        .limit(8),
+      getMonthReadinessLite(pid, minsk.year, minsk.month).catch(() => null),
+    ]);
+
+    return {
+      ...director,
+      todayPayments,
+      serviceRequests: requests,
+      activity,
+      negotiations,
+      debtRooms,
+      expiringSoon,
+      monthReadiness,
+    };
+  });
 }
 
 /** Один и тот же дашборд для директора / зама / заведующей */
