@@ -17,7 +17,7 @@ function rrSplitRender(e){
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v3");
+      const y = localStorage.getItem("rr-split-cols-v4");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -31,35 +31,8 @@ function rrSplitRender(e){
     return 28;
   });
 
-  const S = A.useCallback(
-    (y, h) => (j) => {
-      j.preventDefault();
-      j.stopPropagation();
-      const E = b[y] ?? h;
-      const P = j.clientX;
-      const O = (T) => {
-        const M = Math.max(48, Math.min(420, E + (T.clientX - P)));
-        w((R) => ({ ...R, [y]: M }));
-      };
-      const T = () => {
-        document.removeEventListener("mousemove", O);
-        document.removeEventListener("mouseup", T);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        w((M) => {
-          try {
-            localStorage.setItem("rr-split-cols-v3", JSON.stringify(M));
-          } catch {}
-          return M;
-        });
-      };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", O);
-      document.addEventListener("mouseup", T);
-    },
-    [b]
-  );
+  const dragRef = A.useRef(null);
+  const [guideX, setGuideX] = A.useState(null);
 
   const k = A.useCallback(() => {
     const y = x;
@@ -138,6 +111,43 @@ function rrSplitRender(e){
 
   const cls = (...parts) => parts.filter(Boolean).join(" ");
 
+  const S = (key) => (evt) => {
+    evt.preventDefault();
+    evt.stopPropagation();
+    const startX = evt.clientX;
+    const startW = T(key);
+    dragRef.current = { key, startX, startW };
+    setGuideX(startX);
+
+    const onMove = (ev) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const next = Math.max(52, Math.min(560, Math.round(drag.startW + (ev.clientX - drag.startX))));
+      setGuideX(ev.clientX);
+      w((prev) => (prev[drag.key] === next ? prev : { ...prev, [drag.key]: next }));
+    };
+
+    const onUp = () => {
+      dragRef.current = null;
+      setGuideX(null);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      w((prev) => {
+        try {
+          localStorage.setItem("rr-split-cols-v4", JSON.stringify(prev));
+        } catch {}
+        return prev;
+      });
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   const th = (key, className, label, align) =>
     u.jsxs("th", {
       rowSpan: 2,
@@ -145,7 +155,6 @@ function rrSplitRender(e){
       style: {
         width: T(key),
         minWidth: T(key),
-        maxWidth: T(key),
         position: "relative",
         textAlign: align || "left",
       },
@@ -160,7 +169,7 @@ function rrSplitRender(e){
           className: d.colResizeHandle,
           role: "separator",
           "aria-orientation": "vertical",
-          onMouseDown: S(key, T(key)),
+          onMouseDown: S(key),
         }),
       ],
     });
@@ -258,6 +267,21 @@ function rrSplitRender(e){
   return u.jsxs("div", {
     className: d.splitWrap,
     children: [
+      guideX == null
+        ? null
+        : u.jsx("div", {
+            style: {
+              position: "fixed",
+              top: 0,
+              bottom: 0,
+              left: guideX,
+              width: 2,
+              marginLeft: -1,
+              background: "var(--color-blue, #1267e8)",
+              zIndex: 10000,
+              pointerEvents: "none",
+            },
+          }),
       u.jsxs("table", {
         className: cls(d.splitTable, d.splitTableFixed),
         style: { "--rr-row-h": x + "px" },
@@ -279,7 +303,6 @@ function rrSplitRender(e){
                     style: {
                       width: T("indicator"),
                       minWidth: T("indicator"),
-                      maxWidth: T("indicator"),
                       position: "relative",
                     },
                     children: [
@@ -288,7 +311,7 @@ function rrSplitRender(e){
                         className: d.colResizeHandle,
                         role: "separator",
                         "aria-orientation": "vertical",
-                        onMouseDown: S("indicator", T("indicator")),
+                        onMouseDown: S("indicator"),
                       }),
                     ],
                   }),
@@ -305,7 +328,7 @@ function rrSplitRender(e){
                             className: d.colResizeHandle,
                             role: "separator",
                             "aria-orientation": "vertical",
-                            onMouseDown: S("m" + y + "c", T("m" + y + "c")),
+                            onMouseDown: S("m" + y + "p"),
                           }),
                         ],
                       },
@@ -326,7 +349,6 @@ function rrSplitRender(e){
                           style: {
                             width: T("m" + y + "c"),
                             minWidth: T("m" + y + "c"),
-                            maxWidth: T("m" + y + "c"),
                             position: "relative",
                           },
                           children: [
@@ -340,7 +362,7 @@ function rrSplitRender(e){
                               className: d.colResizeHandle,
                               role: "separator",
                               "aria-orientation": "vertical",
-                              onMouseDown: S("m" + y + "c", T("m" + y + "c")),
+                              onMouseDown: S("m" + y + "c"),
                             }),
                           ],
                         }),
@@ -349,7 +371,6 @@ function rrSplitRender(e){
                           style: {
                             width: T("m" + y + "p"),
                             minWidth: T("m" + y + "p"),
-                            maxWidth: T("m" + y + "p"),
                             position: "relative",
                           },
                           children: [
@@ -363,7 +384,7 @@ function rrSplitRender(e){
                               className: d.colResizeHandle,
                               role: "separator",
                               "aria-orientation": "vertical",
-                              onMouseDown: S("m" + y + "p", T("m" + y + "p")),
+                              onMouseDown: S("m" + y + "p"),
                             }),
                           ],
                         }),

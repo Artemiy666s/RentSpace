@@ -35,8 +35,8 @@ const SPLIT_CSS = [
   '._contractCell_ogxkk_916{max-width:130px;overflow:hidden;text-overflow:ellipsis;color:var(--color-muted);font-size:12px}',
   '._debtCell_ogxkk_917{font-weight:700;border-left:1px solid var(--color-border)}',
   '._thResizable_ogxkk_918{position:relative}',
-  '._colResizeHandle_ogxkk_919{position:absolute;top:0;right:0;width:8px;height:100%;cursor:col-resize;touch-action:none;z-index:3}',
-  '._colResizeHandle_ogxkk_919:after{content:"";position:absolute;top:18%;bottom:18%;right:3px;width:2px;border-radius:1px;background:transparent}',
+  '._colResizeHandle_ogxkk_919{position:absolute;top:0;right:-5px;width:10px;height:100%;cursor:col-resize;touch-action:none;z-index:4}',
+  '._colResizeHandle_ogxkk_919:after{content:"";position:absolute;top:15%;bottom:15%;left:4px;width:2px;border-radius:1px;background:transparent}',
   '._colResizeHandle_ogxkk_919:hover:after,._colResizeHandle_ogxkk_919:active:after{background:var(--color-blue,#1267e8)}',
   '._splitSortBtn_ogxkk_920{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px;width:100%;box-sizing:border-box;font:inherit;font-weight:700;color:inherit}',
   '._splitSortBtn_ogxkk_920:hover{color:var(--color-blue,#1267e8)}',
@@ -61,9 +61,30 @@ function minifyFragment(src) {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => {
+      // Strip line comments carefully (not inside strings).
+      let out = '';
+      let inStr = null;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        const prev = line[i - 1];
+        if (inStr) {
+          out += ch;
+          if (ch === inStr && prev !== '\\') inStr = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') {
+          inStr = ch;
+          out += ch;
+          continue;
+        }
+        if (ch === '/' && line[i + 1] === '/') break;
+        out += ch;
+      }
+      return out.trim();
+    })
     .filter(Boolean)
-    .join('')
+    .join('\n')
     .replace(/\s+/g, ' ')
     .replace(/ ?([{}();,\[\]]) ?/g, '$1')
     .trim();
