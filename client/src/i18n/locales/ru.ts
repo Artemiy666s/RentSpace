@@ -623,6 +623,7 @@ export const ru: TranslationTree = {
     viewClassic: 'Обычная таблица',
     viewSplit: 'Аренда / коммун.',
     viewLabel: 'Вид таблицы',
+    resizeRows: 'Потяните, чтобы изменить высоту строк',
     totalRow: 'ИТОГО',
   },
   tenants: {

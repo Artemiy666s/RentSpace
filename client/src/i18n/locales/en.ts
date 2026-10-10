@@ -622,6 +622,7 @@ export const en: TranslationTree = {
     viewClassic: 'Classic table',
     viewSplit: 'Rent / utilities',
     viewLabel: 'Table view',
+    resizeRows: 'Drag to resize row height',
     totalRow: 'TOTAL',
   },
   tenants: {

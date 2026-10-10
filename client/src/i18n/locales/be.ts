@@ -622,6 +622,7 @@ export const be: TranslationTree = {
     viewClassic: 'Звычайная табліца',
     viewSplit: 'Арэнда / камун.',
     viewLabel: 'Выгляд табліцы',
+    resizeRows: 'Пацягніце, каб змяніць вышыню радкоў',
     totalRow: 'РАЗАМ',
   },
   tenants: {
