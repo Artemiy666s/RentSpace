@@ -11,13 +11,13 @@ function rrSplitRender(e){
   } = e;
 
   const g = A.useMemo(
-    () => ["n", "tenant", "contract", "area", "rate", "indicator", ...r.flatMap((y) => ["m" + y + "c", "m" + y + "p"]), "debt"],
+    () => ["n", "tenant", "contract", "area", "indicator", ...r.flatMap((y) => ["m" + y + "c", "m" + y + "p"]), "debt"],
     [r]
   );
 
   const [b, w] = A.useState(() => {
     try {
-      const y = localStorage.getItem("rr-split-cols-v2");
+      const y = localStorage.getItem("rr-split-cols-v3");
       if (y) return JSON.parse(y);
     } catch {}
     return {};
@@ -48,7 +48,7 @@ function rrSplitRender(e){
         document.body.style.userSelect = "";
         w((M) => {
           try {
-            localStorage.setItem("rr-split-cols-v2", JSON.stringify(M));
+            localStorage.setItem("rr-split-cols-v3", JSON.stringify(M));
           } catch {}
           return M;
         });
@@ -106,9 +106,35 @@ function rrSplitRender(e){
 
   const P = (y) => Math.round((Number(y.debt || 0) + E(y)) * 100) / 100;
 
-  const O = { n: 44, tenant: 170, contract: 130, area: 80, rate: 80, indicator: 78, debt: 96 };
+  const totalArea = A.useMemo(
+    () => Math.round(a.reduce((y, h) => y + Number(h.area || 0), 0) * 100) / 100,
+    [a]
+  );
+  const totalDebt = A.useMemo(() => Math.round(a.reduce((y, h) => y + P(h), 0) * 100) / 100, [a]);
+  const totalUtilCharged = A.useMemo(
+    () =>
+      Math.round(
+        r.reduce((y, h) => {
+          var z;
+          return y + Number(((z = c.monthTotals[h]) == null ? void 0 : z.utility) || 0);
+        }, 0) * 100
+      ) / 100,
+    [r, c]
+  );
+  const totalUtilPaid = A.useMemo(
+    () =>
+      Math.round(
+        r.reduce((y, h) => {
+          var z;
+          return y + Number(((z = c.monthTotals[h]) == null ? void 0 : z.utilityPaid) || 0);
+        }, 0) * 100
+      ) / 100,
+    [r, c]
+  );
+
+  const O = { n: 44, tenant: 190, contract: 140, area: 96, indicator: 78, debt: 104 };
   const T = (y) => b[y] ?? (String(y).startsWith("m") ? 72 : O[y] ?? 80);
-  const M = r.length ? 6 + r.length * 2 + 1 : 7;
+  const M = r.length ? 5 + r.length * 2 + 1 : 6;
 
   const cls = (...parts) => parts.filter(Boolean).join(" ");
 
@@ -138,6 +164,96 @@ function rrSplitRender(e){
       ],
     });
 
+  const summaryRows =
+    a.length > 0
+      ? [
+          u.jsxs("tr", {
+            key: "sum-rent",
+            className: d.totalRow,
+            children: [
+              u.jsx("td", { rowSpan: 2, className: d.numCol }),
+              u.jsx("td", {
+                rowSpan: 2,
+                colSpan: 2,
+                className: d.totalLabel,
+                children: n("rentRegister.totalRow"),
+              }),
+              u.jsxs("td", {
+                rowSpan: 2,
+                className: d.numCell,
+                title: n("rentRegister.colArea"),
+                children: [
+                  totalArea.toLocaleString("ru-RU", { maximumFractionDigits: 2 }),
+                  " ",
+                  n("common.sqm"),
+                ],
+              }),
+              u.jsx("td", { className: d.indicatorCell, children: n("rentRegister.indicatorRent") }),
+              r.map((y) => {
+                var h;
+                return u.jsxs(
+                  A.Fragment,
+                  {
+                    children: [
+                      u.jsx("td", {
+                        className: d.numCell,
+                        children: j((h = c.monthTotals[y]) == null ? void 0 : h.rent),
+                      }),
+                      u.jsx("td", {
+                        className: d.numCell,
+                        children: j((h = c.monthTotals[y]) == null ? void 0 : h.paid),
+                      }),
+                    ],
+                  },
+                  "tr-" + y
+                );
+              }),
+              u.jsx("td", {
+                rowSpan: 2,
+                className: cls(d.numCell, d.debtCell),
+                title: n("common.debt"),
+                children: j(totalDebt),
+              }),
+            ],
+          }),
+          u.jsxs("tr", {
+            key: "sum-util",
+            className: d.totalRow,
+            children: [
+              u.jsx("td", {
+                className: d.indicatorCell,
+                title:
+                  n("rentRegister.indicatorUtil") +
+                  ": " +
+                  j(totalUtilCharged) +
+                  " / " +
+                  j(totalUtilPaid),
+                children: n("rentRegister.indicatorUtil"),
+              }),
+              r.map((y) => {
+                var h;
+                return u.jsxs(
+                  A.Fragment,
+                  {
+                    children: [
+                      u.jsx("td", {
+                        className: d.numCell,
+                        children: j((h = c.monthTotals[y]) == null ? void 0 : h.utility),
+                      }),
+                      u.jsx("td", {
+                        className: d.numCell,
+                        children: j((h = c.monthTotals[y]) == null ? void 0 : h.utilityPaid),
+                      }),
+                    ],
+                  },
+                  "tu-" + y
+                );
+              }),
+            ],
+          }),
+        ]
+      : [];
+
   return u.jsxs("div", {
     className: d.splitWrap,
     children: [
@@ -156,7 +272,6 @@ function rrSplitRender(e){
                   th("tenant", null, n("rentRegister.colTenant")),
                   th("contract", null, n("rentRegister.colContract")),
                   th("area", d.numCell, n("rentRegister.colArea"), "right"),
-                  th("rate", d.numCell, n("rentRegister.colRate"), "right"),
                   u.jsxs("th", {
                     className: cls(d.indicatorCol, d.thResizable),
                     style: {
@@ -206,7 +321,12 @@ function rrSplitRender(e){
                       children: [
                         u.jsxs("th", {
                           className: cls(d.subCol, d.thResizable),
-                          style: { width: T("m" + y + "c"), minWidth: T("m" + y + "c"), maxWidth: T("m" + y + "c"), position: "relative" },
+                          style: {
+                            width: T("m" + y + "c"),
+                            minWidth: T("m" + y + "c"),
+                            maxWidth: T("m" + y + "c"),
+                            position: "relative",
+                          },
                           children: [
                             u.jsx("button", {
                               type: "button",
@@ -224,7 +344,12 @@ function rrSplitRender(e){
                         }),
                         u.jsxs("th", {
                           className: cls(d.subCol, d.thResizable),
-                          style: { width: T("m" + y + "p"), minWidth: T("m" + y + "p"), maxWidth: T("m" + y + "p"), position: "relative" },
+                          style: {
+                            width: T("m" + y + "p"),
+                            minWidth: T("m" + y + "p"),
+                            maxWidth: T("m" + y + "p"),
+                            position: "relative",
+                          },
                           children: [
                             u.jsx("button", {
                               type: "button",
@@ -252,159 +377,112 @@ function rrSplitRender(e){
             children:
               a.length === 0
                 ? u.jsx("tr", { children: u.jsx("td", { colSpan: M, className: d.emptyCell, children: s }) })
-                : a.map((y, h) => {
-                    const N = P(y);
-                    return u.jsxs(
-                      A.Fragment,
-                      {
-                        children: [
-                          u.jsxs("tr", {
-                            className: cls(d.splitRow, h % 2 ? d.splitPairAlt : ""),
-                            onClick: () => i(y),
-                            children: [
-                              u.jsx("td", { rowSpan: 2, className: d.numCol, children: y.rowNum }),
-                              u.jsx("td", { rowSpan: 2, className: d.tenantCell, title: y.tenantName, children: y.tenantName }),
-                              u.jsx("td", {
-                                rowSpan: 2,
-                                className: d.contractCell,
-                                title: y.contractLabel || "",
-                                children: y.contractLabel || "—",
-                              }),
-                              u.jsxs("td", {
-                                rowSpan: 2,
-                                className: d.numCell,
-                                children: [
-                                  Number(y.area || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 }),
-                                  " ",
-                                  n("common.sqm"),
-                                ],
-                              }),
-                              u.jsx("td", {
-                                rowSpan: 2,
-                                className: d.numCell,
-                                children: y.rateWithoutVat != null ? Number(y.rateWithoutVat).toFixed(2) : "—",
-                              }),
-                              u.jsx("td", { className: d.indicatorCell, children: n("rentRegister.indicatorRent") }),
-                              r.map((z) => {
-                                var L;
-                                return u.jsxs(
-                                  A.Fragment,
-                                  {
-                                    children: [
-                                      u.jsx("td", {
-                                        className: d.numCell,
-                                        children: j((L = y.months[z]) == null ? void 0 : L.rent),
-                                      }),
-                                      u.jsx("td", {
-                                        className: d.numCell,
-                                        children: j((L = y.months[z]) == null ? void 0 : L.paid),
-                                      }),
-                                    ],
-                                  },
-                                  "r" + y.rowNum + "-" + z
-                                );
-                              }),
-                              u.jsx("td", { rowSpan: 2, className: cls(d.numCell, d.debtCell), children: j(N) }),
-                            ],
-                          }),
-                          u.jsxs("tr", {
-                            className: cls(d.splitRow, d.splitRowAlt, h % 2 ? d.splitPairAlt : ""),
-                            onClick: () => i(y),
-                            children: [
-                              u.jsx("td", { className: d.indicatorCell, children: n("rentRegister.indicatorUtil") }),
-                              r.map((z) => {
-                                var L;
-                                return u.jsxs(
-                                  A.Fragment,
-                                  {
-                                    children: [
-                                      u.jsx("td", {
-                                        className: d.numCell,
-                                        children: j((L = y.months[z]) == null ? void 0 : L.utility),
-                                      }),
-                                      u.jsx("td", {
-                                        className: d.numCell,
-                                        children: j((L = y.months[z]) == null ? void 0 : L.utilityPaid),
-                                      }),
-                                    ],
-                                  },
-                                  "u" + y.rowNum + "-" + z
-                                );
-                              }),
-                            ],
-                          }),
-                        ],
-                      },
-                      y.rowNum
-                    );
-                  }),
+                : [
+                    ...summaryRows,
+                    ...a.map((y, h) => {
+                      const N = P(y);
+                      return u.jsxs(
+                        A.Fragment,
+                        {
+                          children: [
+                            u.jsxs("tr", {
+                              className: cls(d.splitRow, h % 2 ? d.splitPairAlt : ""),
+                              onClick: () => i(y),
+                              children: [
+                                u.jsx("td", { rowSpan: 2, className: d.numCol, children: y.rowNum }),
+                                u.jsx("td", {
+                                  rowSpan: 2,
+                                  className: d.tenantCell,
+                                  title: y.tenantName,
+                                  children: y.tenantName,
+                                }),
+                                u.jsx("td", {
+                                  rowSpan: 2,
+                                  className: d.contractCell,
+                                  title: y.contractLabel || "",
+                                  children: y.contractLabel || "—",
+                                }),
+                                u.jsxs("td", {
+                                  rowSpan: 2,
+                                  className: d.numCell,
+                                  children: [
+                                    Number(y.area || 0).toLocaleString("ru-RU", {
+                                      maximumFractionDigits: 2,
+                                    }),
+                                    " ",
+                                    n("common.sqm"),
+                                  ],
+                                }),
+                                u.jsx("td", {
+                                  className: d.indicatorCell,
+                                  children: n("rentRegister.indicatorRent"),
+                                }),
+                                r.map((z) => {
+                                  var L;
+                                  return u.jsxs(
+                                    A.Fragment,
+                                    {
+                                      children: [
+                                        u.jsx("td", {
+                                          className: d.numCell,
+                                          children: j((L = y.months[z]) == null ? void 0 : L.rent),
+                                        }),
+                                        u.jsx("td", {
+                                          className: d.numCell,
+                                          children: j((L = y.months[z]) == null ? void 0 : L.paid),
+                                        }),
+                                      ],
+                                    },
+                                    "r" + y.rowNum + "-" + z
+                                  );
+                                }),
+                                u.jsx("td", {
+                                  rowSpan: 2,
+                                  className: cls(d.numCell, d.debtCell),
+                                  children: j(N),
+                                }),
+                              ],
+                            }),
+                            u.jsxs("tr", {
+                              className: cls(d.splitRow, d.splitRowAlt, h % 2 ? d.splitPairAlt : ""),
+                              onClick: () => i(y),
+                              children: [
+                                u.jsx("td", {
+                                  className: d.indicatorCell,
+                                  children: n("rentRegister.indicatorUtil"),
+                                }),
+                                r.map((z) => {
+                                  var L;
+                                  return u.jsxs(
+                                    A.Fragment,
+                                    {
+                                      children: [
+                                        u.jsx("td", {
+                                          className: d.numCell,
+                                          children: j(
+                                            (L = y.months[z]) == null ? void 0 : L.utility
+                                          ),
+                                        }),
+                                        u.jsx("td", {
+                                          className: d.numCell,
+                                          children: j(
+                                            (L = y.months[z]) == null ? void 0 : L.utilityPaid
+                                          ),
+                                        }),
+                                      ],
+                                    },
+                                    "u" + y.rowNum + "-" + z
+                                  );
+                                }),
+                              ],
+                            }),
+                          ],
+                        },
+                        y.rowNum
+                      );
+                    }),
+                  ],
           }),
-          a.length > 0
-            ? u.jsxs("tfoot", {
-                children: [
-                  u.jsxs("tr", {
-                    className: d.totalRow,
-                    children: [
-                      u.jsx("td", { rowSpan: 2, className: d.numCol }),
-                      u.jsx("td", { rowSpan: 2, className: d.totalLabel, children: n("rentRegister.totalRow") }),
-                      u.jsx("td", { rowSpan: 2 }),
-                      u.jsx("td", { rowSpan: 2 }),
-                      u.jsx("td", { rowSpan: 2 }),
-                      u.jsx("td", { className: d.indicatorCell, children: n("rentRegister.indicatorRent") }),
-                      r.map((y) => {
-                        var h;
-                        return u.jsxs(
-                          A.Fragment,
-                          {
-                            children: [
-                              u.jsx("td", {
-                                className: d.numCell,
-                                children: j((h = c.monthTotals[y]) == null ? void 0 : h.rent),
-                              }),
-                              u.jsx("td", {
-                                className: d.numCell,
-                                children: j((h = c.monthTotals[y]) == null ? void 0 : h.paid),
-                              }),
-                            ],
-                          },
-                          "tr-" + y
-                        );
-                      }),
-                      u.jsx("td", {
-                        rowSpan: 2,
-                        className: cls(d.numCell, d.debtCell),
-                        children: j(a.reduce((y, h) => y + P(h), 0)),
-                      }),
-                    ],
-                  }),
-                  u.jsxs("tr", {
-                    className: d.totalRow,
-                    children: [
-                      u.jsx("td", { className: d.indicatorCell, children: n("rentRegister.indicatorUtil") }),
-                      r.map((y) => {
-                        var h;
-                        return u.jsxs(
-                          A.Fragment,
-                          {
-                            children: [
-                              u.jsx("td", {
-                                className: d.numCell,
-                                children: j((h = c.monthTotals[y]) == null ? void 0 : h.utility),
-                              }),
-                              u.jsx("td", {
-                                className: d.numCell,
-                                children: j((h = c.monthTotals[y]) == null ? void 0 : h.utilityPaid),
-                              }),
-                            ],
-                          },
-                          "tu-" + y
-                        );
-                      }),
-                    ],
-                  }),
-                ],
-              })
-            : null,
         ],
       }),
       u.jsx("div", {

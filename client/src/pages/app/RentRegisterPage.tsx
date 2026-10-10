@@ -244,9 +244,18 @@ export function RentRegisterPage() {
         { rent: 0, paid: 0, utility: 0, utilityPaid: 0 }
       );
     }
+    const utilDebt = (row: RegisterRow) =>
+      Object.values(row.months || {}).reduce((s, m) => {
+        return s + Math.max(0, Number(m?.utility || 0) - Number(m?.utilityPaid || 0));
+      }, 0);
     return {
       monthTotals,
+      area: Math.round(filteredRows.reduce((s, r) => s + Number(r.area || 0), 0) * 100) / 100,
       debt: filteredRows.reduce((s, r) => s + (r.debt ?? 0), 0),
+      combinedDebt:
+        Math.round(
+          filteredRows.reduce((s, r) => s + Number(r.debt || 0) + utilDebt(r), 0) * 100
+        ) / 100,
     };
   }, [filteredRows, selectedMonths]);
 
@@ -424,7 +433,7 @@ export function RentRegisterPage() {
         <p>{t('common.loading')}</p>
       ) : viewMode === 'split' ? (
         <div className={styles.splitWrap}>
-          <table className={styles.splitTable}>
+          <table className={`${styles.splitTable} ${styles.splitTableFixed}`}>
             <thead>
               <tr>
                 <th rowSpan={2} className={styles.numCol}>
@@ -434,9 +443,6 @@ export function RentRegisterPage() {
                 <th rowSpan={2}>{t('rentRegister.colContract')}</th>
                 <th rowSpan={2} className={styles.numCell}>
                   {t('rentRegister.colArea')}
-                </th>
-                <th rowSpan={2} className={styles.numCell}>
-                  {t('rentRegister.colRate')}
                 </th>
                 <th rowSpan={2} className={styles.indicatorCol}>
                   {t('rentRegister.colIndicator')}
@@ -462,56 +468,54 @@ export function RentRegisterPage() {
             <tbody>
               {sortedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6 + selectedMonths.length * 2 + 1} className={styles.emptyCell}>
+                  <td colSpan={5 + selectedMonths.length * 2 + 1} className={styles.emptyCell}>
                     {emptyText}
                   </td>
                 </tr>
               ) : (
-                sortedRows.map((row) => (
-                  <SplitTenantRows
-                    key={row.rowNum}
-                    row={row}
-                    months={selectedMonths}
-                    onClick={() => setSelectedRow(row)}
-                    t={t}
-                  />
-                ))
+                <>
+                  <tr className={styles.totalRow}>
+                    <td rowSpan={2} className={styles.numCol} />
+                    <td rowSpan={2} colSpan={2} className={styles.totalLabel}>
+                      {t('rentRegister.totalRow')}
+                    </td>
+                    <td rowSpan={2} className={styles.numCell}>
+                      {totals.area} {t('common.sqm')}
+                    </td>
+                    <td className={styles.indicatorCell}>{t('rentRegister.indicatorRent')}</td>
+                    {selectedMonths.map((m) => (
+                      <FragmentMonthValues
+                        key={`tr-${m}`}
+                        charged={totals.monthTotals[m]?.rent}
+                        paid={totals.monthTotals[m]?.paid}
+                      />
+                    ))}
+                    <td rowSpan={2} className={`${styles.numCell} ${styles.debtCell}`}>
+                      {fmt(totals.combinedDebt)}
+                    </td>
+                  </tr>
+                  <tr className={styles.totalRow}>
+                    <td className={styles.indicatorCell}>{t('rentRegister.indicatorUtil')}</td>
+                    {selectedMonths.map((m) => (
+                      <FragmentMonthValues
+                        key={`tu-${m}`}
+                        charged={totals.monthTotals[m]?.utility}
+                        paid={totals.monthTotals[m]?.utilityPaid}
+                      />
+                    ))}
+                  </tr>
+                  {sortedRows.map((row) => (
+                    <SplitTenantRows
+                      key={row.rowNum}
+                      row={row}
+                      months={selectedMonths}
+                      onClick={() => setSelectedRow(row)}
+                      t={t}
+                    />
+                  ))}
+                </>
               )}
             </tbody>
-            {sortedRows.length > 0 && (
-              <tfoot>
-                <tr className={styles.totalRow}>
-                  <td rowSpan={2} />
-                  <td rowSpan={2} className={styles.totalLabel}>
-                    {t('rentRegister.totalRow')}
-                  </td>
-                  <td rowSpan={2} />
-                  <td rowSpan={2} />
-                  <td rowSpan={2} />
-                  <td className={styles.indicatorCell}>{t('rentRegister.indicatorRent')}</td>
-                  {selectedMonths.map((m) => (
-                    <FragmentMonthValues
-                      key={`tr-${m}`}
-                      charged={totals.monthTotals[m]?.rent}
-                      paid={totals.monthTotals[m]?.paid}
-                    />
-                  ))}
-                  <td rowSpan={2} className={styles.numCell}>
-                    {fmt(totals.debt)}
-                  </td>
-                </tr>
-                <tr className={styles.totalRow}>
-                  <td className={styles.indicatorCell}>{t('rentRegister.indicatorUtil')}</td>
-                  {selectedMonths.map((m) => (
-                    <FragmentMonthValues
-                      key={`tu-${m}`}
-                      charged={totals.monthTotals[m]?.utility}
-                      paid={totals.monthTotals[m]?.utilityPaid}
-                    />
-                  ))}
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
       ) : (
@@ -564,20 +568,27 @@ function SplitTenantRows({
         <td rowSpan={2} className={styles.numCol}>
           {row.rowNum}
         </td>
-        <td rowSpan={2}>{row.tenantName}</td>
-        <td rowSpan={2}>{row.contractLabel}</td>
-        <td rowSpan={2} className={styles.numCell}>
-          {row.area} {t('common.sqm')}
+        <td rowSpan={2} className={styles.tenantCell}>
+          {row.tenantName}
+        </td>
+        <td rowSpan={2} className={styles.contractCell}>
+          {row.contractLabel}
         </td>
         <td rowSpan={2} className={styles.numCell}>
-          {row.rateWithoutVat != null ? Number(row.rateWithoutVat).toFixed(2) : '—'}
+          {row.area} {t('common.sqm')}
         </td>
         <td className={styles.indicatorCell}>{t('rentRegister.indicatorRent')}</td>
         {months.map((m) => (
           <FragmentMonthValues key={`r-${m}`} charged={row.months[m]?.rent} paid={row.months[m]?.paid} />
         ))}
-        <td rowSpan={2} className={styles.numCell}>
-          {fmt(row.debt)}
+        <td rowSpan={2} className={`${styles.numCell} ${styles.debtCell}`}>
+          {fmt(
+            Number(row.debt || 0) +
+              Object.values(row.months || {}).reduce(
+                (s, m) => s + Math.max(0, Number(m?.utility || 0) - Number(m?.utilityPaid || 0)),
+                0
+              )
+          )}
         </td>
       </tr>
       <tr className={`${styles.splitRow} ${styles.splitRowAlt}`} onClick={onClick}>
