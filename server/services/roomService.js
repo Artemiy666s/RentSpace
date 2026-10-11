@@ -77,49 +77,31 @@ async function getRoomDetails(roomId) {
       .catch(() => null),
   ]);
 
-  // Fallback: charges on this room (fast), then property+area + persist if still missing.
+  // Safe fallback only: charges already posted on THIS room_id (no area guessing).
   if (!activeLink) {
-    const { loadLeasesFromRoomCharges, ensureLinksFromChargeLeases } = require('./roomChargeLeaseService');
-    let hit = (await loadLeasesFromRoomCharges([roomId], { byArea: false })).get(Number(roomId));
-    if (!hit) {
-      hit = (await ensureLinksFromChargeLeases([roomId], { byArea: true })).get(Number(roomId));
-    } else if (hit.contract_id) {
-      // Persist link in background; don't block the card.
-      setImmediate(() => {
-        ensureLinksFromChargeLeases([roomId], { byArea: false }).catch(() => {});
-      });
-    }
+    const { loadLeasesFromRoomCharges } = require('./roomChargeLeaseService');
+    const hit = (await loadLeasesFromRoomCharges([roomId], { byArea: false })).get(
+      Number(roomId)
+    );
     if (hit?.contract_id) {
-      activeLink = await activeLeaseQuery(roomId)
+      const fromCharge = await db('contracts as c')
+        .join('tenants as t', 't.id', 'c.tenant_id')
+        .where('c.id', hit.contract_id)
+        .whereNull('c.deleted_at')
+        .whereNull('t.deleted_at')
         .select(
           'c.*',
           't.name as tenant_name',
           't.id as tenant_id',
-          't.status as tenant_status',
-          'cr.area as contract_area',
-          'cr.rate_without_vat as room_rate'
+          't.status as tenant_status'
         )
         .first();
-      if (!activeLink) {
-        const fromCharge = await db('contracts as c')
-          .join('tenants as t', 't.id', 'c.tenant_id')
-          .where('c.id', hit.contract_id)
-          .whereNull('c.deleted_at')
-          .whereNull('t.deleted_at')
-          .select(
-            'c.*',
-            't.name as tenant_name',
-            't.id as tenant_id',
-            't.status as tenant_status'
-          )
-          .first();
-        if (fromCharge) {
-          activeLink = {
-            ...fromCharge,
-            contract_area: Number(room.rentable_area || room.area || 0),
-            room_rate: Number(room.current_rate_without_vat || fromCharge.rate_without_vat || 0),
-          };
-        }
+      if (fromCharge) {
+        activeLink = {
+          ...fromCharge,
+          contract_area: Number(room.rentable_area || room.area || 0),
+          room_rate: Number(room.current_rate_without_vat || fromCharge.rate_without_vat || 0),
+        };
       }
     } else if (hit?.tenant_id && hit?.tenant_name) {
       chargeTenant = {
@@ -127,59 +109,6 @@ async function getRoomDetails(roomId) {
         name: hit.tenant_name,
         status: null,
       };
-    }
-  }
-
-  // Last resort for occupied orphans: match contract by area (single joined query).
-  if (!activeLink && !chargeTenant && ['occupied', 'debt'].includes(room.status)) {
-    const { resolveOrphanRoomLeases } = require('./orphanLeaseRepairService');
-    const resolved = await resolveOrphanRoomLeases(
-      [
-        {
-          id: room.id,
-          property_id: room.property_id,
-          building_id: room.building_id,
-          floor_id: room.floor_id,
-          area: room.area,
-          rentable_area: room.rentable_area,
-          current_rate_without_vat: room.current_rate_without_vat,
-        },
-      ],
-      { relink: true, minScore: 7, relinkMinScore: 10 }
-    );
-    const hit = resolved.get(Number(room.id));
-    if (hit?.contract_id) {
-      activeLink = await activeLeaseQuery(roomId)
-        .select(
-          'c.*',
-          't.name as tenant_name',
-          't.id as tenant_id',
-          't.status as tenant_status',
-          'cr.area as contract_area',
-          'cr.rate_without_vat as room_rate'
-        )
-        .first();
-      if (!activeLink) {
-        const row = await db('contracts as c')
-          .join('tenants as t', 't.id', 'c.tenant_id')
-          .where('c.id', hit.contract_id)
-          .whereNull('c.deleted_at')
-          .whereNull('t.deleted_at')
-          .select(
-            'c.*',
-            't.name as tenant_name',
-            't.id as tenant_id',
-            't.status as tenant_status'
-          )
-          .first();
-        if (row) {
-          activeLink = {
-            ...row,
-            contract_area: Number(room.rentable_area || room.area || 0),
-            room_rate: Number(room.current_rate_without_vat || row.rate_without_vat || 0),
-          };
-        }
-      }
     }
   }
 

@@ -429,48 +429,6 @@ function parsePointsJson(raw) {
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
 
-/** Debounce background orphan repairs so map responses stay fast. */
-const orphanRepairInFlight = new Set();
-
-function scheduleBackgroundOrphanRepair(roomIds) {
-  const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
-  if (!ids.length) return;
-  const key = ids.slice().sort((a, b) => a - b).join(',');
-  if (orphanRepairInFlight.has(key)) return;
-  orphanRepairInFlight.add(key);
-  setImmediate(async () => {
-    try {
-      const orphans = await db('rooms')
-        .whereIn('id', ids)
-        .whereIn('status', ['occupied', 'debt'])
-        .whereNull('deleted_at')
-        .select(
-          'id',
-          'property_id',
-          'building_id',
-          'floor_id',
-          'area',
-          'rentable_area',
-          'current_rate_without_vat'
-        );
-      if (orphans.length) {
-        const { resolveOrphanRoomLeases } = require('../services/orphanLeaseRepairService');
-        await resolveOrphanRoomLeases(orphans, {
-          relink: true,
-          minScore: 7,
-          relinkMinScore: 10,
-        });
-      }
-      const { ensureLinksFromChargeLeases } = require('../services/roomChargeLeaseService');
-      await ensureLinksFromChargeLeases(ids, { byArea: true });
-    } catch (err) {
-      console.error('[map] background orphan lease repair failed', err.message || err);
-    } finally {
-      orphanRepairInFlight.delete(key);
-    }
-  });
-}
-
 async function loadActiveLeasesByRoomIds(roomIds) {
   const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
   if (!ids.length) return new Map();
@@ -510,11 +468,9 @@ async function loadActiveLeasesByRoomIds(roomIds) {
     if (!map.has(roomId)) map.set(roomId, lease);
   }
 
-  const missing = ids.filter((id) => !map.has(id));
-  if (missing.length) {
-    // Heavy orphan matching / DB writes — after response, so the plan stays snappy.
-    scheduleBackgroundOrphanRepair(missing);
-  }
+  // Do NOT auto-write contract_rooms from area heuristics here:
+  // similar areas (≈33–34 м²) belong to different tenants and caused wrong labels.
+  // Display-only: direct links + charges already posted on this room_id.
 
   return map;
 }
