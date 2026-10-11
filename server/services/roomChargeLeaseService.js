@@ -1,7 +1,7 @@
 /**
  * Resolve tenant/contract for map rooms from rent_charges.
- * Covers cases where contract_rooms still point at реестр rooms but charges
- * (and the room card «Начислено») already sit on the map contour.
+ * Fast path: charges already on the map room_id (2–3 queries).
+ * Optional byArea: match реестр charges by property+area (heavier; use off the hot map path).
  */
 const dayjs = require('dayjs');
 const { db } = require('../db');
@@ -10,7 +10,7 @@ function nearly(a, b, eps = 0.35) {
   return Math.abs(Number(a) - Number(b)) <= eps;
 }
 
-async function loadLeasesFromRoomCharges(roomIds) {
+async function loadLeasesFromRoomCharges(roomIds, { byArea = false } = {}) {
   const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
   const out = new Map();
   if (!ids.length) return out;
@@ -47,27 +47,25 @@ async function loadLeasesFromRoomCharges(roomIds) {
     ),
   ];
 
-  const contracts = contractIds.length
-    ? await db('contracts as c')
-        .join('tenants as t', 't.id', 'c.tenant_id')
-        .whereIn('c.id', contractIds)
-        .whereNull('c.deleted_at')
-        .whereNull('t.deleted_at')
-        .select(
-          'c.id as contract_id',
-          'c.status as contract_status',
-          't.id as tenant_id',
-          't.name as tenant_name'
-        )
-    : [];
+  const [contracts, tenants] = await Promise.all([
+    contractIds.length
+      ? db('contracts as c')
+          .join('tenants as t', 't.id', 'c.tenant_id')
+          .whereIn('c.id', contractIds)
+          .whereNull('c.deleted_at')
+          .whereNull('t.deleted_at')
+          .select(
+            'c.id as contract_id',
+            'c.status as contract_status',
+            't.id as tenant_id',
+            't.name as tenant_name'
+          )
+      : Promise.resolve([]),
+    tenantIds.length
+      ? db('tenants').whereIn('id', tenantIds).whereNull('deleted_at').select('id', 'name')
+      : Promise.resolve([]),
+  ]);
   const contractMap = new Map(contracts.map((c) => [Number(c.contract_id), c]));
-
-  const tenants = tenantIds.length
-    ? await db('tenants')
-        .whereIn('id', tenantIds)
-        .whereNull('deleted_at')
-        .select('id', 'name')
-    : [];
   const tenantMap = new Map(tenants.map((t) => [Number(t.id), t]));
 
   for (const [roomId, charge] of latestByRoom) {
@@ -94,40 +92,59 @@ async function loadLeasesFromRoomCharges(roomIds) {
     }
   }
 
-  // Fallback: charges on another room_id, same property + area (реестр vs contour).
+  if (!byArea) return out;
+
+  // Batched area fallback (one query per property, not per room).
   const missing = ids.filter((id) => !out.has(id));
-  if (missing.length) {
-    const roomRows = await db('rooms')
-      .whereIn('id', missing)
-      .whereNull('deleted_at')
-      .select('id', 'property_id', 'area', 'rentable_area');
+  if (!missing.length) return out;
 
-    for (const room of roomRows) {
+  const roomRows = await db('rooms')
+    .whereIn('id', missing)
+    .whereNull('deleted_at')
+    .select('id', 'property_id', 'area', 'rentable_area');
+  if (!roomRows.length) return out;
+
+  const byProperty = new Map();
+  for (const room of roomRows) {
+    const pid = Number(room.property_id);
+    if (!byProperty.has(pid)) byProperty.set(pid, []);
+    byProperty.get(pid).push(room);
+  }
+
+  for (const [propertyId, rooms] of byProperty) {
+    const areas = rooms.map((r) => Number(r.rentable_area || r.area || 0)).filter((a) => a > 0);
+    if (!areas.length) continue;
+    const minA = Math.min(...areas) - 0.35;
+    const maxA = Math.max(...areas) + 0.35;
+
+    const candidates = await db('rent_charges as rc')
+      .join('contracts as c', 'c.id', 'rc.contract_id')
+      .join('tenants as t', 't.id', 'c.tenant_id')
+      .where('rc.property_id', propertyId)
+      .whereNot('rc.status', 'cancelled')
+      .whereNull('c.deleted_at')
+      .whereNull('t.deleted_at')
+      .whereNotNull('rc.contract_id')
+      .whereBetween('rc.area', [minA, maxA])
+      .select(
+        'rc.area as charge_area',
+        't.id as tenant_id',
+        't.name as tenant_name',
+        'c.id as contract_id',
+        'c.status as contract_status',
+        'rc.period_year',
+        'rc.period_month'
+      )
+      .orderBy('rc.period_year', 'desc')
+      .orderBy('rc.period_month', 'desc')
+      .limit(200);
+
+    for (const room of rooms) {
       const area = Number(room.rentable_area || room.area || 0);
-      if (!(area > 0) || !room.property_id) continue;
-
-      const candidates = await db('rent_charges as rc')
-        .join('contracts as c', 'c.id', 'rc.contract_id')
-        .join('tenants as t', 't.id', 'c.tenant_id')
-        .where('rc.property_id', room.property_id)
-        .whereNot('rc.status', 'cancelled')
-        .whereNull('c.deleted_at')
-        .whereNull('t.deleted_at')
-        .whereNotNull('rc.contract_id')
-        .whereRaw('ABS(COALESCE(rc.area, 0) - ?) <= 0.35', [area])
-        .select(
-          't.id as tenant_id',
-          't.name as tenant_name',
-          'c.id as contract_id',
-          'c.status as contract_status'
-        )
-        .orderBy('rc.period_year', 'desc')
-        .orderBy('rc.period_month', 'desc')
-        .limit(8);
-
-      if (!candidates.length) continue;
-      const first = candidates[0];
-      const consistent = candidates.every(
+      const hits = candidates.filter((c) => nearly(c.charge_area, area, 0.35)).slice(0, 8);
+      if (!hits.length) continue;
+      const first = hits[0];
+      const consistent = hits.every(
         (c) =>
           Number(c.contract_id) === Number(first.contract_id) &&
           Number(c.tenant_id) === Number(first.tenant_id)
@@ -145,13 +162,14 @@ async function loadLeasesFromRoomCharges(roomIds) {
   return out;
 }
 
-async function ensureLinksFromChargeLeases(roomIds) {
-  const leases = await loadLeasesFromRoomCharges(roomIds);
+async function ensureLinksFromChargeLeases(roomIds, { byArea = false } = {}) {
+  const leases = await loadLeasesFromRoomCharges(roomIds, { byArea });
   if (!leases.size) return leases;
 
   const asOf = dayjs().format('YYYY-MM-DD');
+  const leaseRoomIds = [...leases.keys()];
   const roomRows = await db('rooms')
-    .whereIn('id', [...leases.keys()])
+    .whereIn('id', leaseRoomIds)
     .whereNull('deleted_at')
     .select(
       'id',
@@ -163,6 +181,34 @@ async function ensureLinksFromChargeLeases(roomIds) {
     );
   const byId = new Map(roomRows.map((r) => [Number(r.id), r]));
 
+  const contractIds = [
+    ...new Set([...leases.values()].map((l) => Number(l.contract_id)).filter(Boolean)),
+  ];
+  const [openLinks, contracts] = await Promise.all([
+    contractIds.length
+      ? db('contract_rooms')
+          .whereIn('contract_id', contractIds)
+          .where(function () {
+            this.whereNull('end_date').orWhere('end_date', '>=', asOf);
+          })
+      : Promise.resolve([]),
+    contractIds.length
+      ? db('contracts').whereIn('id', contractIds).select('id', 'start_date', 'rate_without_vat')
+      : Promise.resolve([]),
+  ]);
+  const linksByContract = new Map();
+  for (const link of openLinks) {
+    const cid = Number(link.contract_id);
+    if (!linksByContract.has(cid)) linksByContract.set(cid, []);
+    linksByContract.get(cid).push(link);
+  }
+  const contractMap = new Map(contracts.map((c) => [Number(c.id), c]));
+
+  const toClose = [];
+  const toInsert = [];
+  const statusUpdates = [];
+  const touchedProperties = new Set();
+
   for (const [roomId, lease] of leases) {
     if (!lease.contract_id) continue;
     if (lease.contract_status && !['active', 'expiring'].includes(lease.contract_status)) {
@@ -171,25 +217,17 @@ async function ensureLinksFromChargeLeases(roomIds) {
     const room = byId.get(Number(roomId));
     if (!room) continue;
     const roomArea = Number(room.rentable_area || room.area || 0);
+    const links = linksByContract.get(Number(lease.contract_id)) || [];
+    if (links.some((l) => Number(l.room_id) === Number(roomId))) continue;
 
-    const openLinks = await db('contract_rooms')
-      .where({ contract_id: lease.contract_id })
-      .where(function () {
-        this.whereNull('end_date').orWhere('end_date', '>=', asOf);
-      });
-    if (openLinks.some((l) => Number(l.room_id) === Number(roomId))) continue;
-
-    for (const link of openLinks) {
+    for (const link of links) {
       if (!nearly(Number(link.area || 0), roomArea, 0.35)) continue;
       if (Number(link.room_id) === Number(roomId)) continue;
-      await db('contract_rooms').where({ id: link.id }).update({
-        end_date: asOf,
-        updated_at: db.fn.now(),
-      });
+      toClose.push(link.id);
     }
 
-    const contract = await db('contracts').where({ id: lease.contract_id }).first();
-    await db('contract_rooms').insert({
+    const contract = contractMap.get(Number(lease.contract_id));
+    toInsert.push({
       contract_id: lease.contract_id,
       room_id: roomId,
       area: roomArea,
@@ -199,15 +237,32 @@ async function ensureLinksFromChargeLeases(roomIds) {
       start_date: contract?.start_date || asOf,
       end_date: null,
     });
-
     if (!['occupied', 'debt'].includes(room.status)) {
-      await db('rooms').where({ id: roomId }).update({
-        status: 'occupied',
-        updated_at: db.fn.now(),
-      });
+      statusUpdates.push(roomId);
     }
+    touchedProperties.add(room.property_id);
+  }
+
+  if (toClose.length) {
+    await db('contract_rooms').whereIn('id', toClose).update({
+      end_date: asOf,
+      updated_at: db.fn.now(),
+    });
+  }
+  if (toInsert.length) {
+    await db('contract_rooms').insert(toInsert);
+  }
+  if (statusUpdates.length) {
+    await db('rooms').whereIn('id', statusUpdates).update({
+      status: 'occupied',
+      updated_at: db.fn.now(),
+    });
+  }
+  if (touchedProperties.size) {
     const { invalidateRentRegisterCache } = require('./managerDataService');
-    invalidateRentRegisterCache(room.property_id);
+    for (const propertyId of touchedProperties) {
+      invalidateRentRegisterCache(propertyId);
+    }
   }
 
   return leases;

@@ -429,73 +429,91 @@ function parsePointsJson(raw) {
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
 
+/** Debounce background orphan repairs so map responses stay fast. */
+const orphanRepairInFlight = new Set();
+
+function scheduleBackgroundOrphanRepair(roomIds) {
+  const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
+  if (!ids.length) return;
+  const key = ids.slice().sort((a, b) => a - b).join(',');
+  if (orphanRepairInFlight.has(key)) return;
+  orphanRepairInFlight.add(key);
+  setImmediate(async () => {
+    try {
+      const orphans = await db('rooms')
+        .whereIn('id', ids)
+        .whereIn('status', ['occupied', 'debt'])
+        .whereNull('deleted_at')
+        .select(
+          'id',
+          'property_id',
+          'building_id',
+          'floor_id',
+          'area',
+          'rentable_area',
+          'current_rate_without_vat'
+        );
+      if (orphans.length) {
+        const { resolveOrphanRoomLeases } = require('../services/orphanLeaseRepairService');
+        await resolveOrphanRoomLeases(orphans, {
+          relink: true,
+          minScore: 7,
+          relinkMinScore: 10,
+        });
+      }
+      const { ensureLinksFromChargeLeases } = require('../services/roomChargeLeaseService');
+      await ensureLinksFromChargeLeases(ids, { byArea: true });
+    } catch (err) {
+      console.error('[map] background orphan lease repair failed', err.message || err);
+    } finally {
+      orphanRepairInFlight.delete(key);
+    }
+  });
+}
+
 async function loadActiveLeasesByRoomIds(roomIds) {
   const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
   if (!ids.length) return new Map();
   const asOf = require('dayjs')().format('YYYY-MM-DD');
-  const rows = await db('contract_rooms as cr')
-    .join('contracts as c', 'c.id', 'cr.contract_id')
-    .join('tenants as t', 't.id', 'c.tenant_id')
-    .whereIn('cr.room_id', ids)
-    .whereIn('c.status', ['active', 'expiring'])
-    .whereNull('c.deleted_at')
-    .whereNull('t.deleted_at')
-    .where(function () {
-      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-    })
-    .select(
-      'cr.room_id',
-      't.id as tenant_id',
-      't.name as tenant_name',
-      'c.id as contract_id',
-      'c.status as contract_status'
-    )
-    .orderBy('cr.id', 'asc');
+
+  // Hot path: direct links + charges already on these room_ids. No N+1, no writes.
+  const [rows, fromCharges] = await Promise.all([
+    db('contract_rooms as cr')
+      .join('contracts as c', 'c.id', 'cr.contract_id')
+      .join('tenants as t', 't.id', 'c.tenant_id')
+      .whereIn('cr.room_id', ids)
+      .whereIn('c.status', ['active', 'expiring'])
+      .whereNull('c.deleted_at')
+      .whereNull('t.deleted_at')
+      .where(function () {
+        this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+      })
+      .select(
+        'cr.room_id',
+        't.id as tenant_id',
+        't.name as tenant_name',
+        'c.id as contract_id',
+        'c.status as contract_status'
+      )
+      .orderBy('cr.id', 'asc'),
+    require('../services/roomChargeLeaseService')
+      .loadLeasesFromRoomCharges(ids, { byArea: false })
+      .catch(() => new Map()),
+  ]);
+
   const map = new Map();
   for (const row of rows) {
     const rid = Number(row.room_id);
     if (!map.has(rid)) map.set(rid, row);
   }
+  for (const [roomId, lease] of fromCharges) {
+    if (!map.has(roomId)) map.set(roomId, lease);
+  }
 
-  // Orphan occupied/debt rooms: lease still on реестр (or other) rooms — match by area/rate.
   const missing = ids.filter((id) => !map.has(id));
   if (missing.length) {
-    const orphans = await db('rooms')
-      .whereIn('id', missing)
-      .whereIn('status', ['occupied', 'debt'])
-      .whereNull('deleted_at')
-      .select(
-        'id',
-        'property_id',
-        'building_id',
-        'floor_id',
-        'area',
-        'rentable_area',
-        'current_rate_without_vat'
-      );
-
-    if (orphans.length) {
-      const { resolveOrphanRoomLeases } = require('../services/orphanLeaseRepairService');
-      // Relink high-confidence matches so map, register and room cards stay consistent.
-      const resolved = await resolveOrphanRoomLeases(orphans, {
-        relink: true,
-        minScore: 7,
-        relinkMinScore: 10,
-      });
-      for (const [roomId, lease] of resolved) {
-        if (!map.has(roomId)) map.set(roomId, lease);
-      }
-    }
-
-    // Charges on the map room (or same property+area) → show tenant and persist link.
-    const still = ids.filter((id) => !map.has(id));
-    if (still.length) {
-      const { ensureLinksFromChargeLeases } = require('../services/roomChargeLeaseService');
-      const fromCharges = await ensureLinksFromChargeLeases(still);
-      for (const [roomId, lease] of fromCharges) {
-        if (!map.has(roomId)) map.set(roomId, lease);
-      }
-    }
+    // Heavy orphan matching / DB writes — after response, so the plan stays snappy.
+    scheduleBackgroundOrphanRepair(missing);
   }
 
   return map;

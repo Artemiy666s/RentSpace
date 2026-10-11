@@ -160,7 +160,8 @@ async function listRoomsTable(query, orgId) {
   let chargeLeases = new Map();
   if (orphanIds.length) {
     const { loadLeasesFromRoomCharges } = require('./roomChargeLeaseService');
-    chargeLeases = await loadLeasesFromRoomCharges(orphanIds);
+    // Fast path only — table list must stay light.
+    chargeLeases = await loadLeasesFromRoomCharges(orphanIds, { byArea: false });
   }
 
   return rows.map((r) => {

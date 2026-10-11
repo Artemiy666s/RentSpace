@@ -41,43 +41,62 @@ function isRegistryRoom(room) {
 
 async function loadActiveContractCandidates(propertyId) {
   const asOf = dayjs().format('YYYY-MM-DD');
-  const contracts = await db('contracts as c')
+  // One joined query instead of N+1 per contract (map load was timing out on this).
+  const rows = await db('contracts as c')
     .join('tenants as t', 't.id', 'c.tenant_id')
+    .join('contract_rooms as cr', 'cr.contract_id', 'c.id')
+    .join('rooms as r', 'r.id', 'cr.room_id')
+    .join('floors as f', 'f.id', 'r.floor_id')
     .where('c.property_id', propertyId)
     .whereIn('c.status', ['active', 'expiring'])
     .whereNull('c.deleted_at')
     .whereNull('t.deleted_at')
+    .where(function () {
+      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+    })
     .select(
-      'c.id',
+      'c.id as contract_id',
       'c.contract_number',
       'c.rate_without_vat',
       'c.start_date',
       't.id as tenant_id',
-      't.name as tenant_name'
+      't.name as tenant_name',
+      'cr.id as link_id',
+      'cr.room_id',
+      'cr.area as link_area',
+      'cr.rate_without_vat as link_rate',
+      'r.room_number',
+      'r.building_id',
+      'f.name as floor_name'
     );
 
-  const out = [];
-  for (const contract of contracts) {
-    const links = await db('contract_rooms as cr')
-      .join('rooms as r', 'r.id', 'cr.room_id')
-      .join('floors as f', 'f.id', 'r.floor_id')
-      .where('cr.contract_id', contract.id)
-      .where(function () {
-        this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-      })
-      .select(
-        'cr.id',
-        'cr.room_id',
-        'cr.area',
-        'cr.rate_without_vat',
-        'r.room_number',
-        'r.building_id',
-        'f.name as floor_name'
-      );
-    if (!links.length) continue;
-    out.push({ contract, links });
+  const byContract = new Map();
+  for (const row of rows) {
+    const cid = Number(row.contract_id);
+    if (!byContract.has(cid)) {
+      byContract.set(cid, {
+        contract: {
+          id: cid,
+          contract_number: row.contract_number,
+          rate_without_vat: row.rate_without_vat,
+          start_date: row.start_date,
+          tenant_id: row.tenant_id,
+          tenant_name: row.tenant_name,
+        },
+        links: [],
+      });
+    }
+    byContract.get(cid).links.push({
+      id: row.link_id,
+      room_id: row.room_id,
+      area: row.link_area,
+      rate_without_vat: row.link_rate,
+      room_number: row.room_number,
+      building_id: row.building_id,
+      floor_name: row.floor_name,
+    });
   }
-  return out;
+  return [...byContract.values()];
 }
 
 async function findMatchingContract(propertyId, orphans, candidates = null) {

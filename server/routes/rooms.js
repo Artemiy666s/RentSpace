@@ -80,7 +80,7 @@ router.get(
     let chargeLeases = new Map();
     if (orphanIds.length) {
       const { loadLeasesFromRoomCharges } = require('../services/roomChargeLeaseService');
-      chargeLeases = await loadLeasesFromRoomCharges(orphanIds);
+      chargeLeases = await loadLeasesFromRoomCharges(orphanIds, { byArea: false });
     }
     ok(
       res,
