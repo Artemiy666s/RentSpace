@@ -656,6 +656,8 @@ async function relinkRoomToContract({
   }
 
   const asOf = dayjs().format('YYYY-MM-DD');
+  // end_date >= asOf still counts as open — close on yesterday so today the new link wins.
+  const closeDate = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
   const roomArea = Number(room.rentable_area || room.area || 0);
   const rate = Number(room.current_rate_without_vat || contract.rate_without_vat || 0);
 
@@ -668,7 +670,7 @@ async function relinkRoomToContract({
   for (const link of openOnRoom) {
     if (Number(link.contract_id) === Number(contractId)) continue;
     await db('contract_rooms').where({ id: link.id }).update({
-      end_date: asOf,
+      end_date: closeDate,
       updated_at: db.fn.now(),
     });
   }
@@ -683,7 +685,7 @@ async function relinkRoomToContract({
     .whereRaw('ABS(COALESCE(area, 0) - ?) <= 0.35', [roomArea]);
   for (const link of sameAreaElsewhere) {
     await db('contract_rooms').where({ id: link.id }).update({
-      end_date: asOf,
+      end_date: closeDate,
       updated_at: db.fn.now(),
     });
   }
