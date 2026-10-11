@@ -457,7 +457,7 @@ async function loadActiveLeasesByRoomIds(roomIds) {
     if (!map.has(rid)) map.set(rid, row);
   }
 
-  // Orphan occupied rooms: status/rate on the map room, lease still on реестр room.
+  // Orphan occupied/debt rooms: lease still on реестр (or other) rooms — match by area/rate.
   const missing = ids.filter((id) => !map.has(id));
   if (missing.length) {
     const orphans = await db('rooms')
@@ -474,69 +474,13 @@ async function loadActiveLeasesByRoomIds(roomIds) {
         'current_rate_without_vat'
       );
 
-    const resolveRegistryLease = async (propertyId, area, rate) => {
-      if (!area) return null;
-      return db('contract_rooms as cr')
-        .join('contracts as c', 'c.id', 'cr.contract_id')
-        .join('tenants as t', 't.id', 'c.tenant_id')
-        .join('rooms as rr', 'rr.id', 'cr.room_id')
-        .join('floors as f', 'f.id', 'rr.floor_id')
-        .where('c.property_id', propertyId)
-        .whereIn('c.status', ['active', 'expiring'])
-        .whereNull('c.deleted_at')
-        .whereNull('t.deleted_at')
-        .where(function () {
-          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-        })
-        .where(function () {
-          this.where('rr.room_number', 'like', 'Р%').orWhere('f.name', 'like', '%реестр%');
-        })
-        .whereRaw('ABS(cr.area - ?) <= 0.35', [area])
-        .modify((qb) => {
-          if (rate > 0) {
-            qb.whereRaw(
-              'ABS(COALESCE(cr.rate_without_vat, c.rate_without_vat, 0) - ?) <= 0.05',
-              [rate]
-            );
-          }
-        })
-        .select(
-          't.id as tenant_id',
-          't.name as tenant_name',
-          'c.id as contract_id',
-          'c.status as contract_status'
-        )
-        .orderBy('cr.id', 'asc')
-        .first();
-    };
-
-    // 1) Per-room area match against реестр links
-    for (const room of orphans) {
-      const area = Number(room.rentable_area || room.area || 0);
-      const rate = Number(room.current_rate_without_vat || 0);
-      const hit = await resolveRegistryLease(room.property_id, area, rate);
-      if (hit) map.set(Number(room.id), hit);
-    }
-
-    // 2) Shared contract: several orphans on same floor/rate ↔ one реестр row with sum area
-    const still = orphans.filter((r) => !map.has(Number(r.id)));
-    const groups = new Map();
-    for (const room of still) {
-      const rate = Number(room.current_rate_without_vat || 0).toFixed(2);
-      const key = `${room.property_id}:${room.floor_id}:${rate}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(room);
-    }
-    for (const group of groups.values()) {
-      if (group.length < 2) continue;
-      const total = group.reduce(
-        (s, r) => s + Number(r.rentable_area || r.area || 0),
-        0
-      );
-      const rate = Number(group[0].current_rate_without_vat || 0);
-      const hit = await resolveRegistryLease(group[0].property_id, total, rate);
-      if (!hit) continue;
-      for (const room of group) map.set(Number(room.id), hit);
+    if (orphans.length) {
+      const { resolveOrphanRoomLeases } = require('../services/orphanLeaseRepairService');
+      // Relink high-confidence matches so map, register and room cards stay consistent.
+      const resolved = await resolveOrphanRoomLeases(orphans, { relink: true, minScore: 9 });
+      for (const [roomId, lease] of resolved) {
+        if (!map.has(roomId)) map.set(roomId, lease);
+      }
     }
   }
 

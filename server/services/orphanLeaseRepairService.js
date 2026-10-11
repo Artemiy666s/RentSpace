@@ -349,6 +349,84 @@ async function repairOrphanRows(rows, { dryRun }) {
   };
 }
 
+/**
+ * Resolve tenant/contract for occupied map rooms that have no open contract_rooms row.
+ * Returns Map<roomId, { tenant_id, tenant_name, contract_id, contract_status }>.
+ * When `relink` is true, also writes contract_rooms onto those map rooms (high-confidence only).
+ */
+async function resolveOrphanRoomLeases(
+  rooms,
+  { relink = false, minScore = 7, relinkMinScore = 10 } = {}
+) {
+  const list = (rooms || []).filter((r) => r && r.id);
+  const result = new Map();
+  if (!list.length) return result;
+
+  const groups = new Map();
+  for (const room of list) {
+    const rate = Number(room.current_rate_without_vat || 0).toFixed(2);
+    const key = `${room.property_id}:${room.building_id || 'x'}:${room.floor_id || 'x'}:${rate}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(room);
+  }
+
+  const usedContracts = new Set();
+  const candidatesByProperty = new Map();
+
+  async function candidatesFor(propertyId) {
+    if (!candidatesByProperty.has(propertyId)) {
+      candidatesByProperty.set(propertyId, await loadActiveContractCandidates(propertyId));
+    }
+    return candidatesByProperty.get(propertyId).filter((c) => !usedContracts.has(c.contract.id));
+  }
+
+  function toLease(match) {
+    return {
+      tenant_id: match.contract.tenant_id,
+      tenant_name: match.contract.tenant_name,
+      contract_id: match.contract.id,
+      contract_status: 'active',
+      score: match.score,
+    };
+  }
+
+  for (const group of groups.values()) {
+    const candidates = await candidatesFor(group[0].property_id);
+    const match = await findMatchingContract(group[0].property_id, group, candidates);
+
+    if (!match && group.length > 1) {
+      for (const room of group) {
+        const single = await findMatchingContract(
+          room.property_id,
+          [room],
+          await candidatesFor(room.property_id)
+        );
+        if (!single || single.score < minScore) continue;
+        usedContracts.add(single.contract.id);
+        result.set(Number(room.id), toLease(single));
+        if (relink && single.score >= relinkMinScore) {
+          await relinkContractToRooms(single, [room]);
+          invalidateRentRegisterCache(room.property_id);
+        }
+      }
+      continue;
+    }
+
+    if (!match || match.score < minScore) continue;
+    usedContracts.add(match.contract.id);
+    const lease = toLease(match);
+    for (const room of group) result.set(Number(room.id), lease);
+    if (relink && match.score >= relinkMinScore) {
+      await relinkContractToRooms(match, group);
+      invalidateRentRegisterCache(group[0].property_id);
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   repairOrphanOccupiedRooms,
+  findMatchingContract,
+  resolveOrphanRoomLeases,
 };
