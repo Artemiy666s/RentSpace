@@ -477,8 +477,22 @@ async function loadActiveLeasesByRoomIds(roomIds) {
     if (orphans.length) {
       const { resolveOrphanRoomLeases } = require('../services/orphanLeaseRepairService');
       // Relink high-confidence matches so map, register and room cards stay consistent.
-      const resolved = await resolveOrphanRoomLeases(orphans, { relink: true, minScore: 9 });
+      const resolved = await resolveOrphanRoomLeases(orphans, {
+        relink: true,
+        minScore: 7,
+        relinkMinScore: 10,
+      });
       for (const [roomId, lease] of resolved) {
+        if (!map.has(roomId)) map.set(roomId, lease);
+      }
+    }
+
+    // Charges already sit on the map room (as in room card «Начислено») → take tenant from them.
+    const still = ids.filter((id) => !map.has(id));
+    if (still.length) {
+      const { loadLeasesFromRoomCharges } = require('../services/roomChargeLeaseService');
+      const fromCharges = await loadLeasesFromRoomCharges(still);
+      for (const [roomId, lease] of fromCharges) {
         if (!map.has(roomId)) map.set(roomId, lease);
       }
     }

@@ -111,29 +111,20 @@ async function findMatchingContract(propertyId, orphans, candidates = null) {
       if (orphanAreas.every((a, i) => nearly(a, linkAreas[i], 0.25))) score += 6;
     }
 
-    // Single orphan ↔ single link by area (+ rate if known)
-    if (orphans.length === 1 && links.length === 1) {
-      const oa = Number(orphans[0].area || orphans[0].rentable_area || 0);
-      if (nearly(oa, Number(links[0].area), 0.25)) {
-        score += 3;
-        if (rate > 0 && nearly(linkRate, rate, 0.05)) score += 2;
-        if (registryOnly) score += 2;
-      }
-    }
-
-    // Single map room matches ONE link of a multi-room contract (e.g. 1 м² of 1+8.6).
+    // Single map room matches one contract_rooms link by area (1:1 or one of many).
     let partialLink = null;
-    if (orphans.length === 1 && links.length > 1) {
+    if (orphans.length === 1) {
       const oa = Number(orphans[0].area || orphans[0].rentable_area || 0);
-      partialLink =
-        links.find((l) => nearly(oa, Number(l.area), 0.25)) ||
-        null;
-      if (partialLink) {
-        score += 6;
-        const partialRate =
-          Number(partialLink.rate_without_vat) || Number(contract.rate_without_vat) || 0;
-        if (rate > 0 && nearly(partialRate, rate, 0.05)) score += 2;
-        if (isRegistryRoom(partialLink)) score += 3;
+      const areaHit = links.find((l) => nearly(oa, Number(l.area), 0.35)) || null;
+      if (areaHit) {
+        // Enough alone to pass minScore=7 even without rate/реестр naming.
+        score += 8;
+        const hitRate =
+          Number(areaHit.rate_without_vat) || Number(contract.rate_without_vat) || 0;
+        if (rate > 0 && nearly(hitRate, rate, 0.05)) score += 2;
+        else if (rate > 0 && nearly(hitRate, rate, 3)) score += 1;
+        if (isRegistryRoom(areaHit)) score += 2;
+        if (links.length > 1) partialLink = areaHit;
       }
     }
 

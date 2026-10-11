@@ -53,6 +53,7 @@ async function getRoomDetails(roomId) {
     utilMonth = maxDueUtilityMonth(utilYear) || 12;
   }
 
+  let chargeTenant = null;
   let [property, building, floor, activeLink, negotiation] = await Promise.all([
     db('properties').where({ id: room.property_id }).first(),
     db('buildings').where({ id: room.building_id }).first(),
@@ -131,19 +132,15 @@ async function getRoomDetails(roomId) {
     }
   }
 
-  // Fallback: charges already posted on this map room → take tenant from that contract.
-  if (!activeLink && ['occupied', 'debt'].includes(room.status)) {
-    const charge = await db('rent_charges')
-      .where({ room_id: roomId })
-      .whereNot('status', 'cancelled')
-      .whereNotNull('contract_id')
-      .orderBy('period_year', 'desc')
-      .orderBy('period_month', 'desc')
-      .first();
-    if (charge?.contract_id) {
+  // Fallback: charges already posted on this map room → take tenant from that contract/tenant.
+  if (!activeLink) {
+    const { loadLeasesFromRoomCharges } = require('./roomChargeLeaseService');
+    const fromCharges = await loadLeasesFromRoomCharges([roomId]);
+    const hit = fromCharges.get(Number(roomId));
+    if (hit?.contract_id) {
       const fromCharge = await db('contracts as c')
         .join('tenants as t', 't.id', 'c.tenant_id')
-        .where('c.id', charge.contract_id)
+        .where('c.id', hit.contract_id)
         .whereNull('c.deleted_at')
         .whereNull('t.deleted_at')
         .select(
@@ -171,7 +168,7 @@ async function getRoomDetails(roomId) {
           const already = openLinks.some((l) => Number(l.room_id) === Number(roomId));
           if (!already) {
             for (const link of openLinks) {
-              if (Math.abs(Number(link.area || 0) - roomArea) > 0.25) continue;
+              if (Math.abs(Number(link.area || 0) - roomArea) > 0.35) continue;
               if (Number(link.room_id) === Number(roomId)) continue;
               await db('contract_rooms').where({ id: link.id }).update({
                 end_date: asOf,
@@ -192,6 +189,12 @@ async function getRoomDetails(roomId) {
           }
         }
       }
+    } else if (hit?.tenant_id && hit?.tenant_name) {
+      chargeTenant = {
+        id: hit.tenant_id,
+        name: hit.tenant_name,
+        status: null,
+      };
     }
   }
 
@@ -253,7 +256,7 @@ async function getRoomDetails(roomId) {
     contract: activeLink || null,
     tenant: activeLink
       ? { id: activeLink.tenant_id, name: activeLink.tenant_name, status: activeLink.tenant_status }
-      : null,
+      : chargeTenant,
     negotiation: negotiation || null,
     monthlyCharged: charged,
     monthlyUtilities: utilities,
