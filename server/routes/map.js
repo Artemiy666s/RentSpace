@@ -487,11 +487,11 @@ async function loadActiveLeasesByRoomIds(roomIds) {
       }
     }
 
-    // Charges already sit on the map room (as in room card «Начислено») → take tenant from them.
+    // Charges on the map room (or same property+area) → show tenant and persist link.
     const still = ids.filter((id) => !map.has(id));
     if (still.length) {
-      const { loadLeasesFromRoomCharges } = require('../services/roomChargeLeaseService');
-      const fromCharges = await loadLeasesFromRoomCharges(still);
+      const { ensureLinksFromChargeLeases } = require('../services/roomChargeLeaseService');
+      const fromCharges = await ensureLinksFromChargeLeases(still);
       for (const [roomId, lease] of fromCharges) {
         if (!map.has(roomId)) map.set(roomId, lease);
       }

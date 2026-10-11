@@ -149,7 +149,23 @@ async function listRoomsTable(query, orgId) {
 
   const rows = await q.orderBy(['b.name', 'f.level_number', 'r.room_number']);
 
+  // Fill tenant from charges when lease join is empty but room already has accruals.
+  const orphanIds = rows
+    .filter(
+      (r) =>
+        !r.tenant_name &&
+        (['occupied', 'debt'].includes(r.status) || Number(r.rent_charged || 0) > 0)
+    )
+    .map((r) => r.id);
+  let chargeLeases = new Map();
+  if (orphanIds.length) {
+    const { loadLeasesFromRoomCharges } = require('./roomChargeLeaseService');
+    chargeLeases = await loadLeasesFromRoomCharges(orphanIds);
+  }
+
   return rows.map((r) => {
+    const fromCharge = chargeLeases.get(Number(r.id));
+    const tenantName = r.tenant_name || fromCharge?.tenant_name || null;
     const rate = Number(r.cr_rate || r.current_rate_without_vat || r.recommended_rate_without_vat || 0);
     const vat = Number(r.vat_rate || 20);
     const rentCharged = Number(r.rent_charged || 0);
@@ -166,9 +182,9 @@ async function listRoomsTable(query, orgId) {
       area: Number(r.area),
       rentableArea: Number(r.rentable_area || r.area),
       status:
-        r.tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
+        tenantName && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
       roomType: r.room_type,
-      tenantName: r.tenant_name,
+      tenantName,
       tenantUnp: r.unp,
       contractNumber: r.contract_number,
       contractDate: r.contract_date,

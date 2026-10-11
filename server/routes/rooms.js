@@ -73,12 +73,31 @@ router.get(
           .orWhere('active_lease.tenant_name', 'like', s);
       });
     }
+    const rows = await q.orderBy('r.room_number');
+    const orphanIds = rows
+      .filter((r) => !r.tenant_name && ['occupied', 'debt'].includes(r.status))
+      .map((r) => r.id);
+    let chargeLeases = new Map();
+    if (orphanIds.length) {
+      const { loadLeasesFromRoomCharges } = require('../services/roomChargeLeaseService');
+      chargeLeases = await loadLeasesFromRoomCharges(orphanIds);
+    }
     ok(
       res,
-      (await q.orderBy('r.room_number')).map((r) => ({
-        ...r,
-        status: r.tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
-      }))
+      rows.map((r) => {
+        const fromCharge = chargeLeases.get(Number(r.id));
+        const tenant_name = r.tenant_name || fromCharge?.tenant_name || null;
+        const tenant_id = r.tenant_id || fromCharge?.tenant_id || null;
+        const contract_id = r.contract_id || fromCharge?.contract_id || null;
+        return {
+          ...r,
+          tenant_name,
+          tenant_id,
+          contract_id,
+          status:
+            tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
+        };
+      })
     );
   })
 );

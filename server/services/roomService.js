@@ -132,61 +132,41 @@ async function getRoomDetails(roomId) {
     }
   }
 
-  // Fallback: charges already posted on this map room → take tenant from that contract/tenant.
+  // Fallback: charges on this map room (or same property+area) → tenant + persist link.
   if (!activeLink) {
-    const { loadLeasesFromRoomCharges } = require('./roomChargeLeaseService');
-    const fromCharges = await loadLeasesFromRoomCharges([roomId]);
+    const { ensureLinksFromChargeLeases } = require('./roomChargeLeaseService');
+    const fromCharges = await ensureLinksFromChargeLeases([roomId]);
     const hit = fromCharges.get(Number(roomId));
     if (hit?.contract_id) {
-      const fromCharge = await db('contracts as c')
-        .join('tenants as t', 't.id', 'c.tenant_id')
-        .where('c.id', hit.contract_id)
-        .whereNull('c.deleted_at')
-        .whereNull('t.deleted_at')
+      activeLink = await activeLeaseQuery(roomId)
         .select(
           'c.*',
           't.name as tenant_name',
           't.id as tenant_id',
-          't.status as tenant_status'
+          't.status as tenant_status',
+          'cr.area as contract_area',
+          'cr.rate_without_vat as room_rate'
         )
         .first();
-      if (fromCharge) {
-        const roomArea = Number(room.rentable_area || room.area || 0);
-        activeLink = {
-          ...fromCharge,
-          contract_area: roomArea,
-          room_rate: Number(room.current_rate_without_vat || fromCharge.rate_without_vat || 0),
-        };
-        // Persist map-room link; close only same-area open links (keep other rooms of the contract).
-        if (['active', 'expiring'].includes(fromCharge.status)) {
-          const asOf = dayjs().format('YYYY-MM-DD');
-          const openLinks = await db('contract_rooms')
-            .where({ contract_id: fromCharge.id })
-            .where(function () {
-              this.whereNull('end_date').orWhere('end_date', '>=', asOf);
-            });
-          const already = openLinks.some((l) => Number(l.room_id) === Number(roomId));
-          if (!already) {
-            for (const link of openLinks) {
-              if (Math.abs(Number(link.area || 0) - roomArea) > 0.35) continue;
-              if (Number(link.room_id) === Number(roomId)) continue;
-              await db('contract_rooms').where({ id: link.id }).update({
-                end_date: asOf,
-                updated_at: db.fn.now(),
-              });
-            }
-            await db('contract_rooms').insert({
-              contract_id: fromCharge.id,
-              room_id: roomId,
-              area: roomArea,
-              rate_without_vat: Number(
-                room.current_rate_without_vat || fromCharge.rate_without_vat || 0
-              ),
-              start_date: fromCharge.start_date || asOf,
-              end_date: null,
-            });
-            invalidateRentRegisterCache(room.property_id);
-          }
+      if (!activeLink) {
+        const fromCharge = await db('contracts as c')
+          .join('tenants as t', 't.id', 'c.tenant_id')
+          .where('c.id', hit.contract_id)
+          .whereNull('c.deleted_at')
+          .whereNull('t.deleted_at')
+          .select(
+            'c.*',
+            't.name as tenant_name',
+            't.id as tenant_id',
+            't.status as tenant_status'
+          )
+          .first();
+        if (fromCharge) {
+          activeLink = {
+            ...fromCharge,
+            contract_area: Number(room.rentable_area || room.area || 0),
+            room_rate: Number(room.current_rate_without_vat || fromCharge.rate_without_vat || 0),
+          };
         }
       }
     } else if (hit?.tenant_id && hit?.tenant_name) {
