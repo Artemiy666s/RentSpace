@@ -78,33 +78,24 @@ async function getRoomDetails(roomId) {
 
   // Map room marked «сдано» with rate/area, but lease still hangs on реестр room.
   if (!activeLink && ['occupied', 'debt'].includes(room.status)) {
-    const area = Number(room.rentable_area || room.area || 0);
-    const rate = Number(room.current_rate_without_vat || 0);
-    const asOf = dayjs().format('YYYY-MM-DD');
-    const registryLeaseSelect = () =>
-      db('contract_rooms as cr')
-        .join('contracts as c', 'c.id', 'cr.contract_id')
-        .join('tenants as t', 't.id', 'c.tenant_id')
-        .join('rooms as rr', 'rr.id', 'cr.room_id')
-        .join('floors as f', 'f.id', 'rr.floor_id')
-        .where('c.property_id', room.property_id)
-        .whereIn('c.status', ['active', 'expiring'])
-        .whereNull('c.deleted_at')
-        .whereNull('t.deleted_at')
-        .where(function () {
-          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-        })
-        .where(function () {
-          this.where('rr.room_number', 'like', 'Р%').orWhere('f.name', 'like', '%реестр%');
-        })
-        .modify((qb) => {
-          if (rate > 0) {
-            qb.whereRaw(
-              'ABS(COALESCE(cr.rate_without_vat, c.rate_without_vat, 0) - ?) <= 0.05',
-              [rate]
-            );
-          }
-        })
+    const { resolveOrphanRoomLeases } = require('./orphanLeaseRepairService');
+    const resolved = await resolveOrphanRoomLeases(
+      [
+        {
+          id: room.id,
+          property_id: room.property_id,
+          building_id: room.building_id,
+          floor_id: room.floor_id,
+          area: room.area,
+          rentable_area: room.rentable_area,
+          current_rate_without_vat: room.current_rate_without_vat,
+        },
+      ],
+      { relink: true, minScore: 7, relinkMinScore: 10 }
+    );
+    const hit = resolved.get(Number(room.id));
+    if (hit?.contract_id) {
+      activeLink = await activeLeaseQuery(roomId)
         .select(
           'c.*',
           't.name as tenant_name',
@@ -113,29 +104,93 @@ async function getRoomDetails(roomId) {
           'cr.area as contract_area',
           'cr.rate_without_vat as room_rate'
         )
-        .orderBy('cr.id', 'asc');
-
-    if (area > 0) {
-      activeLink = await registryLeaseSelect()
-        .whereRaw('ABS(cr.area - ?) <= 0.35', [area])
         .first();
+      if (!activeLink) {
+        activeLink = await db('contracts as c')
+          .join('tenants as t', 't.id', 'c.tenant_id')
+          .where('c.id', hit.contract_id)
+          .whereNull('c.deleted_at')
+          .whereNull('t.deleted_at')
+          .select(
+            'c.*',
+            't.name as tenant_name',
+            't.id as tenant_id',
+            't.status as tenant_status'
+          )
+          .first()
+          .then((row) =>
+            row
+              ? {
+                  ...row,
+                  contract_area: Number(room.rentable_area || room.area || 0),
+                  room_rate: Number(room.current_rate_without_vat || row.rate_without_vat || 0),
+                }
+              : null
+          );
+      }
     }
+  }
 
-    if (!activeLink && rate > 0) {
-      const siblings = await db('rooms')
-        .where({ floor_id: room.floor_id })
-        .whereIn('status', ['occupied', 'debt'])
-        .whereNull('deleted_at')
-        .whereRaw('ABS(COALESCE(current_rate_without_vat, 0) - ?) <= 0.05', [rate])
-        .select('id', 'area', 'rentable_area');
-      const total = siblings.reduce(
-        (s, r) => s + Number(r.rentable_area || r.area || 0),
-        0
-      );
-      if (total > 0) {
-        activeLink = await registryLeaseSelect()
-          .whereRaw('ABS(cr.area - ?) <= 0.6', [total])
-          .first();
+  // Fallback: charges already posted on this map room → take tenant from that contract.
+  if (!activeLink && ['occupied', 'debt'].includes(room.status)) {
+    const charge = await db('rent_charges')
+      .where({ room_id: roomId })
+      .whereNot('status', 'cancelled')
+      .whereNotNull('contract_id')
+      .orderBy('period_year', 'desc')
+      .orderBy('period_month', 'desc')
+      .first();
+    if (charge?.contract_id) {
+      const fromCharge = await db('contracts as c')
+        .join('tenants as t', 't.id', 'c.tenant_id')
+        .where('c.id', charge.contract_id)
+        .whereNull('c.deleted_at')
+        .whereNull('t.deleted_at')
+        .select(
+          'c.*',
+          't.name as tenant_name',
+          't.id as tenant_id',
+          't.status as tenant_status'
+        )
+        .first();
+      if (fromCharge) {
+        const roomArea = Number(room.rentable_area || room.area || 0);
+        activeLink = {
+          ...fromCharge,
+          contract_area: roomArea,
+          room_rate: Number(room.current_rate_without_vat || fromCharge.rate_without_vat || 0),
+        };
+        // Persist map-room link; close only same-area open links (keep other rooms of the contract).
+        if (['active', 'expiring'].includes(fromCharge.status)) {
+          const asOf = dayjs().format('YYYY-MM-DD');
+          const openLinks = await db('contract_rooms')
+            .where({ contract_id: fromCharge.id })
+            .where(function () {
+              this.whereNull('end_date').orWhere('end_date', '>=', asOf);
+            });
+          const already = openLinks.some((l) => Number(l.room_id) === Number(roomId));
+          if (!already) {
+            for (const link of openLinks) {
+              if (Math.abs(Number(link.area || 0) - roomArea) > 0.25) continue;
+              if (Number(link.room_id) === Number(roomId)) continue;
+              await db('contract_rooms').where({ id: link.id }).update({
+                end_date: asOf,
+                updated_at: db.fn.now(),
+              });
+            }
+            await db('contract_rooms').insert({
+              contract_id: fromCharge.id,
+              room_id: roomId,
+              area: roomArea,
+              rate_without_vat: Number(
+                room.current_rate_without_vat || fromCharge.rate_without_vat || 0
+              ),
+              start_date: fromCharge.start_date || asOf,
+              end_date: null,
+            });
+            invalidateRentRegisterCache(room.property_id);
+          }
+        }
       }
     }
   }

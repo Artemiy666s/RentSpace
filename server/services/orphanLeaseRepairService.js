@@ -121,10 +121,34 @@ async function findMatchingContract(propertyId, orphans, candidates = null) {
       }
     }
 
+    // Single map room matches ONE link of a multi-room contract (e.g. 1 м² of 1+8.6).
+    let partialLink = null;
+    if (orphans.length === 1 && links.length > 1) {
+      const oa = Number(orphans[0].area || orphans[0].rentable_area || 0);
+      partialLink =
+        links.find((l) => nearly(oa, Number(l.area), 0.25)) ||
+        null;
+      if (partialLink) {
+        score += 6;
+        const partialRate =
+          Number(partialLink.rate_without_vat) || Number(contract.rate_without_vat) || 0;
+        if (rate > 0 && nearly(partialRate, rate, 0.05)) score += 2;
+        if (isRegistryRoom(partialLink)) score += 3;
+      }
+    }
+
     // Multi-room orphans should prefer aggregated area match over accidental single-room hits.
     const minScore = orphans.length > 1 ? 9 : 7;
     if (score >= minScore) {
-      scored.push({ contract, links, score, linkArea, linkRate, registryOnly });
+      scored.push({
+        contract,
+        links,
+        score,
+        linkArea,
+        linkRate,
+        registryOnly,
+        partialLink,
+      });
     }
   }
 
@@ -141,10 +165,25 @@ async function relinkContractToRooms(match, orphans) {
     Number(contract.rate_without_vat) ||
     0;
 
-  // Close old links (keep history) then attach map rooms.
+  const orphanAreaSum = orphans.reduce(
+    (s, r) => s + Number(r.area || r.rentable_area || 0),
+    0
+  );
+  const linkAreaSum = links.reduce((s, l) => s + Number(l.area || 0), 0);
+  const fullReplace =
+    orphans.length === links.length || nearly(orphanAreaSum, linkAreaSum, 0.6);
+
+  // Close only the links we are replacing. For a partial match (1 м² of a
+  // multi-room contract) leave the other open links intact.
   for (const link of links) {
     const stillMapRoom = orphans.some((r) => Number(r.id) === Number(link.room_id));
     if (stillMapRoom) continue;
+    if (!fullReplace) {
+      const replacesThis = orphans.some((r) =>
+        nearly(Number(r.area || r.rentable_area || 0), Number(link.area || 0), 0.25)
+      );
+      if (!replacesThis) continue;
+    }
     await db('contract_rooms').where({ id: link.id }).update({
       end_date: asOf,
       updated_at: db.fn.now(),
@@ -402,7 +441,8 @@ async function resolveOrphanRoomLeases(
           await candidatesFor(room.property_id)
         );
         if (!single || single.score < minScore) continue;
-        usedContracts.add(single.contract.id);
+        // Partial one-link hits must not block the rest of the same contract.
+        if (!single.partialLink) usedContracts.add(single.contract.id);
         result.set(Number(room.id), toLease(single));
         if (relink && single.score >= relinkMinScore) {
           await relinkContractToRooms(single, [room]);
@@ -413,7 +453,7 @@ async function resolveOrphanRoomLeases(
     }
 
     if (!match || match.score < minScore) continue;
-    usedContracts.add(match.contract.id);
+    if (!match.partialLink) usedContracts.add(match.contract.id);
     const lease = toLease(match);
     for (const room of group) result.set(Number(room.id), lease);
     if (relink && match.score >= relinkMinScore) {
