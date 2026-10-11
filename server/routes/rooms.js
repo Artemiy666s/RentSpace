@@ -10,6 +10,7 @@ const {
   getRoomHistory,
   updateRoomLease,
   changeRoomTenant,
+  relinkRoomToContract,
 } = require('../services/roomService');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, fail } = require('../utils/response');
@@ -282,6 +283,34 @@ router.post(
         ip: req.ip,
       });
       ok(res, { ...result, room: await getRoomDetails(req.params.id) });
+    } catch (e) {
+      if (e.status) return fail(res, e.message, e.status);
+      throw e;
+    }
+  })
+);
+
+router.post(
+  '/:id/relink-contract',
+  requireRoles(...ROOM_WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    const room = await db('rooms').where({ id: req.params.id }).first();
+    if (!room) return fail(res, 'Помещение не найдено', 404);
+    const contractId = Number(req.body.contractId);
+    if (!contractId) return fail(res, 'Укажите contractId', 400);
+    const orgId =
+      req.user.organizationId ||
+      (await db('properties').where({ id: room.property_id }).first())?.organization_id;
+    try {
+      const details = await relinkRoomToContract({
+        roomId: Number(req.params.id),
+        contractId,
+        userId: req.user.id,
+        organizationId: orgId,
+        propertyId: room.property_id,
+        ip: req.ip,
+      });
+      ok(res, details);
     } catch (e) {
       if (e.status) return fail(res, e.message, e.status);
       throw e;
