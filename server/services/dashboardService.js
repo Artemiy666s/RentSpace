@@ -19,41 +19,68 @@ function roundMoney(value) {
 
 /**
  * Задолженность по аренде + коммунальные.
- * Итог долга = как в реестре (начислено по закрытым месяцам − оплаты за год).
- * Текущий месяц (счета с 10-го) в «задолженность» не входит — это ещё не просрочка.
- * Разбивка по месяцам — FIFO с января: оплаты закрывают старые месяцы первыми,
- * чтобы «оплачено до мая» не всплывало как долг за янв–май.
+ * Итог долга = начислено по закрытым месяцам − все оплаты аренды за год (по объекту).
+ * Текущий месяц в долг не входит.
+ * Разбивка по месяцам — FIFO по всему объекту с января: оплаты закрывают янв→…,
+ * даже если платёж записан на другой договор того же объекта (частый случай в реестре).
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows =
     registerRowsPreloaded || (await listRentRegister(propertyId, year, null, { ensureCharges: false }));
   const dueThrough = maxDebtRentMonth(year);
 
-  const monthTotals = {};
-  const debtBreakdown = [];
+  const chargedByMonth = {};
+  let yearPaid = 0;
+  for (const row of registerRows) {
+    for (let m = 1; m <= 12; m += 1) {
+      yearPaid += Number(row.months?.[m]?.paid || 0);
+      if (m <= dueThrough) {
+        chargedByMonth[m] =
+          roundMoney((chargedByMonth[m] || 0) + Number(row.months?.[m]?.rent || 0));
+      }
+    }
+  }
+  yearPaid = roundMoney(yearPaid);
 
+  let dueCharged = 0;
+  for (let m = 1; m <= dueThrough; m += 1) dueCharged += chargedByMonth[m] || 0;
+  dueCharged = roundMoney(dueCharged);
+  const debt = roundMoney(Math.max(0, dueCharged - yearPaid));
+
+  // Property-level FIFO for month chips.
+  let paidLeft = yearPaid;
+  const monthTotals = {};
+  for (let m = 1; m <= dueThrough; m += 1) {
+    const charged = chargedByMonth[m] || 0;
+    if (charged <= 0) continue;
+    const applied = Math.min(charged, paidLeft);
+    paidLeft = roundMoney(paidLeft - applied);
+    const monthDebt = roundMoney(charged - applied);
+    if (monthDebt > 0.005) monthTotals[m] = monthDebt;
+  }
+
+  // Per-contract breakdown for the modal (same FIFO idea, at contract grain).
+  const debtBreakdown = [];
   for (const row of registerRows) {
     const registerDebt = roundMoney(row.debt || 0);
     if (registerDebt <= 0.005) continue;
 
     let dueRent = 0;
-    for (let m = 1; m <= dueThrough; m += 1) {
-      dueRent += Number(row.months?.[m]?.rent || 0);
+    let rowPaid = 0;
+    for (let m = 1; m <= 12; m += 1) {
+      rowPaid += Number(row.months?.[m]?.paid || 0);
+      if (m <= dueThrough) dueRent += Number(row.months?.[m]?.rent || 0);
     }
     dueRent = roundMoney(dueRent);
-    // Сколько оплат уже «съело» закрытые начисления (согласовано с row.debt).
-    let paidLeft = roundMoney(Math.max(0, dueRent - registerDebt));
-
+    let left = roundMoney(Math.min(rowPaid, dueRent));
     const months = [];
     for (let m = 1; m <= dueThrough; m += 1) {
       const charged = Number(row.months?.[m]?.rent || 0);
       if (charged <= 0) continue;
-      const applied = Math.min(charged, paidLeft);
-      paidLeft = roundMoney(paidLeft - applied);
-      const debt = roundMoney(charged - applied);
-      if (debt <= 0.005) continue;
-      months.push({ month: m, debt });
-      monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
+      const applied = Math.min(charged, left);
+      left = roundMoney(left - applied);
+      const d = roundMoney(charged - applied);
+      if (d > 0.005) months.push({ month: m, debt: d });
     }
 
     debtBreakdown.push({
@@ -76,8 +103,6 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     .filter((row) => row.amount > 0.005)
     .sort((a, b) => b.month - a.month);
 
-  const debt = roundMoney(registerRows.reduce((s, row) => s + Number(row.debt || 0), 0));
-
   const utilDueThrough = maxDueUtilityMonth(year);
   const utilMonths = [];
   for (let m = 1; m <= utilDueThrough; m++) {
@@ -94,31 +119,34 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   }
   utilMonths.sort((a, b) => b.month - a.month);
 
-  // Задолженность по коммуналке — отдельно от аренды (due − оплаты), разбивка FIFO с января.
-  const utilMonthDebtTotals = {};
-  let utilityDebt = 0;
+  // Коммуналка: FIFO по объекту с января (как аренда).
+  const utilChargedByMonth = {};
+  let utilYearPaid = 0;
   for (const row of registerRows) {
-    let dueUtil = 0;
-    let utilPaidYear = 0;
-    for (let m = 1; m <= 12; m++) {
-      if (m <= utilDueThrough) dueUtil += Number(row.months?.[m]?.utility || 0);
-      utilPaidYear += Number(row.months?.[m]?.utilityPaid || 0);
+    for (let m = 1; m <= 12; m += 1) {
+      utilYearPaid += Number(row.months?.[m]?.utilityPaid || 0);
+      if (m <= utilDueThrough) {
+        utilChargedByMonth[m] = roundMoney(
+          (utilChargedByMonth[m] || 0) + Number(row.months?.[m]?.utility || 0)
+        );
+      }
     }
-    dueUtil = roundMoney(dueUtil);
-    const contractUtilDebt = roundMoney(Math.max(0, dueUtil - utilPaidYear));
-    if (contractUtilDebt <= 0.005) continue;
-    utilityDebt = roundMoney(utilityDebt + contractUtilDebt);
+  }
+  utilYearPaid = roundMoney(utilYearPaid);
+  let utilDueCharged = 0;
+  for (let m = 1; m <= utilDueThrough; m += 1) utilDueCharged += utilChargedByMonth[m] || 0;
+  utilDueCharged = roundMoney(utilDueCharged);
+  const utilityDebt = roundMoney(Math.max(0, utilDueCharged - utilYearPaid));
 
-    let paidLeft = roundMoney(Math.max(0, dueUtil - contractUtilDebt));
-    for (let m = 1; m <= utilDueThrough; m += 1) {
-      const charged = Number(row.months?.[m]?.utility || 0);
-      if (charged <= 0) continue;
-      const applied = Math.min(charged, paidLeft);
-      paidLeft = roundMoney(paidLeft - applied);
-      const monthDebt = roundMoney(charged - applied);
-      if (monthDebt <= 0.005) continue;
-      utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + monthDebt);
-    }
+  const utilMonthDebtTotals = {};
+  let utilPaidLeft = utilYearPaid;
+  for (let m = 1; m <= utilDueThrough; m += 1) {
+    const charged = utilChargedByMonth[m] || 0;
+    if (charged <= 0) continue;
+    const applied = Math.min(charged, utilPaidLeft);
+    utilPaidLeft = roundMoney(utilPaidLeft - applied);
+    const monthDebt = roundMoney(charged - applied);
+    if (monthDebt > 0.005) utilMonthDebtTotals[m] = monthDebt;
   }
 
   const utilityDebtMonths = Object.entries(utilMonthDebtTotals)
@@ -325,7 +353,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 async function getManagerDashboard(propertyId, organizationId) {
   const pid = Number(propertyId);
   const oid = organizationId == null ? 0 : Number(organizationId);
-  const cacheKey = `dashboard:v3:${pid}:${oid}`;
+  const cacheKey = `dashboard:v4:${pid}:${oid}`;
 
   return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
     const today = dayjs().format('YYYY-MM-DD');
