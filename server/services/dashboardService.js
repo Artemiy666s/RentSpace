@@ -18,10 +18,12 @@ function roundMoney(value) {
 }
 
 /**
- * Задолженность по аренде + коммунальные — как в реестре «Нач. / Опл.»:
- * по каждому месяцу и договору долг = max(0, начислено − оплачено за этот месяц).
- * Текущий месяц аренды в просрочку не входит (счета с 10-го ещё не «долг»).
- * Без FIFO/перекидывания оплат между месяцами и договорами.
+ * Задолженность по аренде + коммунальные.
+ * Итог долга = как в реестре: начислено по закрытым месяцам − ВСЕ оплаты аренды за год
+ * по договору (не строго «месяц к месяцу»).
+ * Разбивка по месяцам — с конца: остаток долга на свежие закрытые месяцы,
+ * чтобы из‑за рассинхрона period_month у платежей уже оплаченные апр/май
+ * не выглядели как долг.
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows =
@@ -30,27 +32,29 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
 
   const monthTotals = {};
   const debtBreakdown = [];
-  let debt = 0;
 
   for (const row of registerRows) {
+    const registerDebt = roundMoney(row.debt || 0);
+    if (registerDebt <= 0.005) continue;
+
+    let remaining = registerDebt;
     const months = [];
-    let rowDebt = 0;
-    for (let m = 1; m <= dueThrough; m += 1) {
+    for (let m = dueThrough; m >= 1 && remaining > 0.005; m -= 1) {
       const charged = Number(row.months?.[m]?.rent || 0);
-      const paid = Number(row.months?.[m]?.paid || 0);
-      const monthDebt = roundMoney(Math.max(0, charged - paid));
+      if (charged <= 0) continue;
+      const slice = Math.min(charged, remaining);
+      const monthDebt = roundMoney(slice);
       if (monthDebt <= 0.005) continue;
       months.push({ month: m, debt: monthDebt });
       monthTotals[m] = roundMoney((monthTotals[m] || 0) + monthDebt);
-      rowDebt = roundMoney(rowDebt + monthDebt);
+      remaining = roundMoney(remaining - monthDebt);
     }
-    if (rowDebt <= 0.005) continue;
-    debt = roundMoney(debt + rowDebt);
+
     debtBreakdown.push({
       contractId: row.contractId,
       tenantName: row.tenantName || '—',
       contractNumber: row.contractLabel || String(row.contractId),
-      debt: rowDebt,
+      debt: registerDebt,
       months: months.sort((a, b) => b.month - a.month),
     });
   }
@@ -66,32 +70,47 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     .filter((row) => row.amount > 0.005)
     .sort((a, b) => b.month - a.month);
 
+  const debt = roundMoney(registerRows.reduce((s, row) => s + Number(row.debt || 0), 0));
+
   const utilDueThrough = maxDueUtilityMonth(year);
   const utilMonths = [];
-  const utilMonthDebtTotals = {};
-  let utilityDebt = 0;
-
   for (let m = 1; m <= utilDueThrough; m += 1) {
     let charged = 0;
     let paid = 0;
-    let monthDebt = 0;
     for (const row of registerRows) {
-      const c = Number(row.months?.[m]?.utility || 0);
-      const p = Number(row.months?.[m]?.utilityPaid || 0);
-      charged += c;
-      paid += p;
-      monthDebt += Math.max(0, c - p);
+      charged += Number(row.months?.[m]?.utility || 0);
+      paid += Number(row.months?.[m]?.utilityPaid || 0);
     }
     charged = roundMoney(charged);
     paid = roundMoney(paid);
-    monthDebt = roundMoney(monthDebt);
     if (charged || paid) utilMonths.push({ year, month: m, charged, paid });
-    if (monthDebt > 0.005) {
-      utilMonthDebtTotals[m] = monthDebt;
-      utilityDebt = roundMoney(utilityDebt + monthDebt);
-    }
   }
   utilMonths.sort((a, b) => b.month - a.month);
+
+  const utilMonthDebtTotals = {};
+  let utilityDebt = 0;
+  for (const row of registerRows) {
+    let dueUtil = 0;
+    let utilPaidYear = 0;
+    for (let m = 1; m <= 12; m += 1) {
+      if (m <= utilDueThrough) dueUtil += Number(row.months?.[m]?.utility || 0);
+      utilPaidYear += Number(row.months?.[m]?.utilityPaid || 0);
+    }
+    const contractUtilDebt = roundMoney(Math.max(0, dueUtil - utilPaidYear));
+    if (contractUtilDebt <= 0.005) continue;
+    utilityDebt = roundMoney(utilityDebt + contractUtilDebt);
+
+    let remaining = contractUtilDebt;
+    for (let m = utilDueThrough; m >= 1 && remaining > 0.005; m -= 1) {
+      const charged = Number(row.months?.[m]?.utility || 0);
+      if (charged <= 0) continue;
+      const slice = Math.min(charged, remaining);
+      const monthDebt = roundMoney(slice);
+      if (monthDebt <= 0.005) continue;
+      utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + monthDebt);
+      remaining = roundMoney(remaining - monthDebt);
+    }
+  }
 
   const utilityDebtMonths = Object.entries(utilMonthDebtTotals)
     .map(([month, amount]) => ({
@@ -297,7 +316,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 async function getManagerDashboard(propertyId, organizationId) {
   const pid = Number(propertyId);
   const oid = organizationId == null ? 0 : Number(organizationId);
-  const cacheKey = `dashboard:v5:${pid}:${oid}`;
+  const cacheKey = `dashboard:v6:${pid}:${oid}`;
 
   return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
     const today = dayjs().format('YYYY-MM-DD');

@@ -134,10 +134,17 @@ async function importRentSheet(worksheet, ctx) {
     if (col < COL.rent.monthsStart) return;
     const v = String(cell.value || '').toLowerCase().replace(/\s+/g, ' ');
     for (const [name, m] of Object.entries(MONTH_MAP)) {
-      if (v.includes('аренда') && v.includes(name)) {
+      if (!v.includes(name)) continue;
+      const isPaidCol = /(^|[^а-яё])опл/.test(v) || v.includes('оплат');
+      const isUtil = v.includes('возмещ') || v.includes('коммун');
+      const isRent = v.includes('аренда');
+      if (isPaidCol) {
+        // «Опл. январь» / «аренда опл. январь» / «возмещ. опл. январь»
+        if (isUtil) monthCols.push({ col, month: m, type: 'utilityPaid' });
+        else monthCols.push({ col, month: m, type: 'rentPaid' });
+      } else if (isRent) {
         monthCols.push({ col, month: m, type: 'rent' });
-      }
-      if (v.includes('возмещ') && v.includes(name)) {
+      } else if (isUtil) {
         monthCols.push({ col, month: m, type: 'utility' });
       }
     }
@@ -232,7 +239,7 @@ async function importRentSheet(worksheet, ctx) {
             });
             summary.rentCharges++;
           }
-        } else {
+        } else if (mc.type === 'utility') {
           const exists = await db('utility_charges').where({
             contract_id: contract.id,
             period_year: year,
@@ -252,6 +259,32 @@ async function importRentSheet(worksheet, ctx) {
               amount,
             });
             summary.utilityCharges++;
+          }
+        } else if (mc.type === 'rentPaid' || mc.type === 'utilityPaid') {
+          const paymentType = mc.type === 'rentPaid' ? 'rent' : 'utilities';
+          const exists = await db('payments')
+            .where({
+              contract_id: contract.id,
+              period_year: year,
+              period_month: mc.month,
+              payment_type: paymentType,
+            })
+            .first();
+          if (!exists) {
+            const day = paymentType === 'rent' ? '10' : '15';
+            await db('payments').insert({
+              organization_id: organizationId,
+              property_id: propertyId,
+              tenant_id: tenant.id,
+              contract_id: contract.id,
+              payment_date: `${year}-${String(mc.month).padStart(2, '0')}-${day}`,
+              amount,
+              payment_type: paymentType,
+              period_year: year,
+              period_month: mc.month,
+              purpose: paymentType === 'rent' ? 'Арендная оплата (импорт)' : 'Коммунальная оплата (импорт)',
+            });
+            summary.payments = (summary.payments || 0) + 1;
           }
         }
       }

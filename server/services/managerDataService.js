@@ -596,11 +596,17 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
     cacheDelPrefix(`dashboard:v2:${propertyId}:`);
     cacheDelPrefix(`dashboard:v3:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v4:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v5:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v6:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
     cacheDelPrefix('dashboard:v1:');
     cacheDelPrefix('dashboard:v2:');
     cacheDelPrefix('dashboard:v3:');
+    cacheDelPrefix('dashboard:v4:');
+    cacheDelPrefix('dashboard:v5:');
+    cacheDelPrefix('dashboard:v6:');
   }
 }
 
@@ -915,6 +921,63 @@ async function upsertRegisterUtilityPaid(contract, year, month, amount, userId) 
   });
 }
 
+async function upsertRegisterRentPaid(contract, year, month, amount, userId) {
+  const existing = await db('payments')
+    .where({
+      contract_id: contract.id,
+      period_year: year,
+      period_month: month,
+      payment_type: 'rent',
+    })
+    .orderBy('id', 'asc');
+
+  if (!amount || amount <= 0) {
+    if (existing.length) {
+      await db('payments')
+        .whereIn(
+          'id',
+          existing.map((p) => p.id)
+        )
+        .delete();
+    }
+    return;
+  }
+
+  const rounded = Math.round(Number(amount) * 100) / 100;
+  const paymentDate = `${year}-${String(month).padStart(2, '0')}-10`;
+  if (existing.length) {
+    const [first, ...rest] = existing;
+    await db('payments').where({ id: first.id }).update({
+      amount: rounded,
+      payment_date: first.payment_date || paymentDate,
+      updated_at: db.fn.now(),
+    });
+    if (rest.length) {
+      await db('payments')
+        .whereIn(
+          'id',
+          rest.map((p) => p.id)
+        )
+        .delete();
+    }
+    return;
+  }
+
+  await db('payments').insert({
+    organization_id: contract.organization_id,
+    property_id: contract.property_id,
+    tenant_id: contract.tenant_id,
+    contract_id: contract.id,
+    payment_date: paymentDate,
+    amount: rounded,
+    payment_type: 'rent',
+    period_year: year,
+    period_month: month,
+    purpose: 'Арендная оплата (реестр)',
+    created_by: userId || null,
+  });
+}
+
 async function updateRentRegisterRow(contractId, body, userId) {
   const contract = await db('contracts').where({ id: contractId }).whereNull('deleted_at').first();
   if (!contract) {
@@ -991,6 +1054,9 @@ async function updateRentRegisterRow(contractId, body, userId) {
       if (!month || month < 1 || month > 12 || !vals) continue;
       if ('rent' in vals) {
         await upsertRegisterRentCharge(chargeContract, roomId, year, month, Number(vals.rent) || 0, userId);
+      }
+      if ('paid' in vals) {
+        await upsertRegisterRentPaid(chargeContract, year, month, Number(vals.paid) || 0, userId);
       }
       if ('utility' in vals) {
         await upsertRegisterUtilityCharge(chargeContract, year, month, Number(vals.utility) || 0, userId);

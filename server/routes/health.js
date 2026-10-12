@@ -145,4 +145,168 @@ router.post(
   })
 );
 
+/** Counts charges vs payments — diagnose missing rent «Опл.» rows. */
+router.get(
+  '/payment-audit',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const propertyId = Number(req.query.propertyId) || null;
+    const year = Number(req.query.year) || new Date().getFullYear();
+
+    let chargesQ = db('rent_charges')
+      .where({ period_year: year })
+      .whereNot('status', 'cancelled');
+    let payQ = db('payments').where({ period_year: year, payment_type: 'rent' });
+    let utilQ = db('utility_charges').where({ period_year: year });
+    let utilPayQ = db('payments').where({ period_year: year, payment_type: 'utilities' });
+    if (propertyId) {
+      chargesQ = chargesQ.andWhere({ property_id: propertyId });
+      payQ = payQ.andWhere({ property_id: propertyId });
+      utilQ = utilQ.andWhere({ property_id: propertyId });
+      utilPayQ = utilPayQ.andWhere({ property_id: propertyId });
+    }
+
+    const [rentCharges, rentPayments, utilCharges, utilPayments, rentByMonth, payByMonth] =
+      await Promise.all([
+        chargesQ.clone().count('* as c').sum('amount_with_vat as s').first(),
+        payQ.clone().count('* as c').sum('amount as s').first(),
+        utilQ.clone().count('* as c').sum('amount as s').first(),
+        utilPayQ.clone().count('* as c').sum('amount as s').first(),
+        chargesQ
+          .clone()
+          .groupBy('period_month')
+          .sum('amount_with_vat as total')
+          .count('* as rows')
+          .select('period_month')
+          .orderBy('period_month'),
+        payQ
+          .clone()
+          .groupBy('period_month')
+          .sum('amount as total')
+          .count('* as rows')
+          .select('period_month')
+          .orderBy('period_month'),
+      ]);
+
+    res.json({
+      success: true,
+      data: {
+        propertyId,
+        year,
+        rentCharges,
+        rentPayments,
+        utilCharges,
+        utilPayments,
+        rentByMonth,
+        payByMonth,
+      },
+    });
+  })
+);
+
+/**
+ * Backfill rent payments = charges for months 1..throughMonth where payment is missing/zero.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/backfill-rent-paid',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const { invalidateRentRegisterCache } = require('../services/managerDataService');
+    const body = req.body || {};
+    const propertyId = Number(body.propertyId);
+    const year = Number(body.year) || new Date().getFullYear();
+    const throughMonth = Math.min(12, Math.max(1, Number(body.throughMonth) || 5));
+    const apply = body.apply === true || body.dryRun === false;
+    if (!propertyId) {
+      res.status(400).json({ success: false, error: 'propertyId required' });
+      return;
+    }
+
+    const charges = await db('rent_charges')
+      .where({ property_id: propertyId, period_year: year })
+      .whereNot('status', 'cancelled')
+      .where('period_month', '<=', throughMonth)
+      .where('amount_with_vat', '>', 0)
+      .select(
+        'id',
+        'organization_id',
+        'property_id',
+        'tenant_id',
+        'contract_id',
+        'period_month',
+        'amount_with_vat'
+      );
+
+    const existing = await db('payments')
+      .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+      .where('period_month', '<=', throughMonth)
+      .select('id', 'contract_id', 'period_month', 'amount');
+
+    const paidKey = new Map();
+    for (const p of existing) {
+      const key = `${p.contract_id}-${p.period_month}`;
+      paidKey.set(key, (paidKey.get(key) || 0) + Number(p.amount || 0));
+    }
+
+    const planned = [];
+    for (const c of charges) {
+      if (!c.contract_id) continue;
+      const key = `${c.contract_id}-${c.period_month}`;
+      const already = paidKey.get(key) || 0;
+      const charged = Number(c.amount_with_vat || 0);
+      if (already + 0.005 >= charged) continue;
+      const amount = Math.round((charged - already) * 100) / 100;
+      planned.push({
+        contractId: c.contract_id,
+        tenantId: c.tenant_id,
+        month: c.period_month,
+        amount,
+        charged,
+        alreadyPaid: already,
+      });
+      paidKey.set(key, already + amount);
+    }
+
+    const property = await db('properties').where({ id: propertyId }).first();
+    const organizationId = property?.organization_id || charges[0]?.organization_id || null;
+
+    let inserted = 0;
+    if (apply) {
+      for (const row of planned) {
+        await db('payments').insert({
+          organization_id: organizationId,
+          property_id: propertyId,
+          tenant_id: row.tenantId,
+          contract_id: row.contractId,
+          payment_date: `${year}-${String(row.month).padStart(2, '0')}-10`,
+          amount: row.amount,
+          payment_type: 'rent',
+          period_year: year,
+          period_month: row.month,
+          purpose: `Арендная оплата (backfill до ${throughMonth}.${year})`,
+        });
+        inserted += 1;
+      }
+      invalidateRentRegisterCache(propertyId);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        propertyId,
+        year,
+        throughMonth,
+        apply,
+        planned: planned.length,
+        inserted,
+        sample: planned.slice(0, 20),
+        totalAmount: Math.round(planned.reduce((s, r) => s + r.amount, 0) * 100) / 100,
+      },
+    });
+  })
+);
+
 module.exports = router;
