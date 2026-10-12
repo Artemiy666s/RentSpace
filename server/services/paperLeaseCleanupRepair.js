@@ -300,10 +300,58 @@ async function repairPaperLeaseCleanup({ propertyId = 1, year = 2026, dryRun = t
         .orderBy('id', 'asc')
         .first();
 
-      const target = await findRoomByBuildingFloorNumber(pid, ['56а', '56a'], 1, '2');
+      let target = await findRoomByBuildingFloorNumber(pid, ['56а', '56a'], 1, '2');
+      if (!target) {
+        // Broader: any floor in 56а/56a with number 2 / «2» / каб.2
+        target = await db('rooms as r')
+          .join('buildings as b', 'b.id', 'r.building_id')
+          .leftJoin('floors as f', 'f.id', 'r.floor_id')
+          .where('r.property_id', pid)
+          .whereNull('r.deleted_at')
+          .where(function () {
+            this.where('b.code', '56а')
+              .orWhere('b.code', '56a')
+              .orWhere('b.name', 'like', '%56а%')
+              .orWhere('b.name', 'like', '%56a%');
+          })
+          .where(function () {
+            this.where('r.room_number', '2')
+              .orWhere('r.room_number', '02')
+              .orWhere('r.room_number', 'like', '2 %')
+              .orWhere('r.room_number', 'like', '%каб%2%')
+              .orWhere('r.name', 'like', '%каб%2%');
+          })
+          .select(
+            'r.id as roomId',
+            'r.room_number',
+            'r.status',
+            'r.area',
+            'b.code as buildingCode',
+            'b.name as buildingName',
+            'f.name as floorName',
+            'f.level_number'
+          )
+          .orderBy('r.id', 'asc')
+          .first();
+      }
+      const candidates56a = await db('rooms as r')
+        .join('buildings as b', 'b.id', 'r.building_id')
+        .leftJoin('floors as f', 'f.id', 'r.floor_id')
+        .where('r.property_id', pid)
+        .whereNull('r.deleted_at')
+        .where(function () {
+          this.where('b.code', '56а')
+            .orWhere('b.code', '56a')
+            .orWhere('b.name', 'like', '%56а%')
+            .orWhere('b.name', 'like', '%56a%');
+        })
+        .select('r.id as roomId', 'r.room_number', 'r.status', 'r.area', 'f.name as floorName', 'f.level_number')
+        .orderBy(['f.level_number', 'r.room_number'])
+        .limit(80);
       actions.push({
         type: 'lookup_vlasenko_room_2',
         found: target || null,
+        candidates56aSample: candidates56a.slice(0, 40),
       });
       if (canonical && target) {
         const already = await db('contract_rooms')
