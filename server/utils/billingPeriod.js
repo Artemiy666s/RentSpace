@@ -1,7 +1,9 @@
 /**
  * Правила начисления (таймзона Europe/Minsk):
  * - аренда за месяц M — с 10-го числа месяца M (счета выставляются после 10-го);
- * - коммуналка за месяц M — после 15-го числа месяца M+1.
+ * - коммуналка за месяц M — после 15-го числа месяца M+1;
+ * - задолженность по аренде — только закрытые месяцы (текущий месяц, только что
+ *   выставленный с 10-го, в «долг» не входит, пока месяц не закончился).
  */
 
 const RENT_CHARGE_DAY = 10;
@@ -39,6 +41,19 @@ function maxDueRentMonth(year, asOf = new Date()) {
 }
 
 /**
+ * До какого месяца года аренда считается просроченной задолженностью (включительно).
+ * Текущий календарный месяц не входит: счёт уже выставлен с 10-го, но это ещё не «долг».
+ * 0 — в этом году просроченных месяцев ещё нет.
+ */
+function maxDebtRentMonth(year, asOf = new Date()) {
+  const now = nowInMinsk(asOf);
+  const y = Number(year);
+  if (now.year > y) return 12;
+  if (now.year < y) return 0;
+  return Math.max(0, now.month - 1);
+}
+
+/**
  * До какого месяца года коммуналка уже показывается (включительно).
  */
 function maxDueUtilityMonth(year, asOf = new Date()) {
@@ -61,5 +76,6 @@ module.exports = {
   UTILITY_CHARGE_DAY,
   nowInMinsk,
   maxDueRentMonth,
+  maxDebtRentMonth,
   maxDueUtilityMonth,
 };

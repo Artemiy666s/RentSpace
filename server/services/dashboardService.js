@@ -2,7 +2,12 @@ const dayjs = require('dayjs');
 const { db } = require('../db');
 const { getMonthReadinessLite } = require('./monthCloseService');
 const { listRentRegister } = require('./managerDataService');
-const { maxDueRentMonth, maxDueUtilityMonth, nowInMinsk } = require('../utils/billingPeriod');
+const {
+  maxDueRentMonth,
+  maxDebtRentMonth,
+  maxDueUtilityMonth,
+  nowInMinsk,
+} = require('../utils/billingPeriod');
 const { roomRentableArea, isOccupiedForArea, sumRentableArea } = require('../utils/rentableArea');
 const { cacheWrap } = require('../utils/ttlCache');
 
@@ -14,14 +19,15 @@ function roundMoney(value) {
 
 /**
  * Задолженность по аренде + коммунальные.
- * Итог долга = как в реестре (начислено due − оплаты за год).
- * Разбивка по месяцам — с конца года: остаток долга вешаем на свежие месяцы,
+ * Итог долга = как в реестре (начислено по закрытым месяцам − оплаты за год).
+ * Текущий месяц (счета с 10-го) в «задолженность» не входит — это ещё не просрочка.
+ * Разбивка по месяцам — с конца: остаток долга вешаем на свежие закрытые месяцы,
  * чтобы уже закрытые (апр/май) не всплывали из‑за рассинхрона period_month у платежей.
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows =
     registerRowsPreloaded || (await listRentRegister(propertyId, year, null, { ensureCharges: false }));
-  const dueThrough = maxDueRentMonth(year);
+  const dueThrough = maxDebtRentMonth(year);
 
   const monthTotals = {};
   const debtBreakdown = [];
@@ -312,7 +318,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 async function getManagerDashboard(propertyId, organizationId) {
   const pid = Number(propertyId);
   const oid = organizationId == null ? 0 : Number(organizationId);
-  const cacheKey = `dashboard:v2:${pid}:${oid}`;
+  const cacheKey = `dashboard:v3:${pid}:${oid}`;
 
   return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
     const today = dayjs().format('YYYY-MM-DD');
