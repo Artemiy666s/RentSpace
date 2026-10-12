@@ -15,11 +15,13 @@ function roundMoney(value) {
 
 /**
  * Payments and charges for the same tenant + contract_number sometimes land on
- * different contract rows. Debt is per contract_id, so the charge row looks unpaid.
+ * different contract rows (including soft-deleted / legacy low ids).
+ * Debt is per contract_id, so the charge row looks unpaid.
  *
- * Strategy: within each (property, tenant, contract_number) group that has 2+
- * live contracts, pick the canonical row (most rent_charges, then lowest id),
- * and move payments (+ optional utility/rent charge leftovers) onto it.
+ * Strategy:
+ * - Group ALL contracts on the property (live + deleted) by tenant + contract_number
+ * - Canonical = live row with most non-cancelled rent_charges this year
+ * - Move payments / stray charges from every other row in the group onto canonical
  */
 async function repairDuplicateContractPayments({
   propertyId,
@@ -40,19 +42,45 @@ async function repairDuplicateContractPayments({
     ? contractNumbers.map(normContractNumber).filter(Boolean)
     : null;
 
+  // Include deleted contracts — payments often still point at them.
   const contracts = await db('contracts as c')
     .join('tenants as t', 't.id', 'c.tenant_id')
     .where('c.property_id', pid)
-    .whereNull('c.deleted_at')
     .whereNull('t.deleted_at')
     .select(
       'c.id',
       'c.tenant_id',
       'c.contract_number',
       'c.status',
+      'c.deleted_at',
       'c.organization_id',
       't.name as tenant_name'
     );
+
+  // Also pull contracts referenced by this year's payments on the property
+  // (covers orphans where contract.property_id drifted or row was hard to find).
+  const payContractIds = await db('payments')
+    .where({ property_id: pid, period_year: y })
+    .whereNotNull('contract_id')
+    .distinct('contract_id')
+    .pluck('contract_id');
+  const knownIds = new Set(contracts.map((c) => Number(c.id)));
+  const missingPayIds = payContractIds.map(Number).filter((id) => id && !knownIds.has(id));
+  if (missingPayIds.length) {
+    const extra = await db('contracts as c')
+      .join('tenants as t', 't.id', 'c.tenant_id')
+      .whereIn('c.id', missingPayIds)
+      .select(
+        'c.id',
+        'c.tenant_id',
+        'c.contract_number',
+        'c.status',
+        'c.deleted_at',
+        'c.organization_id',
+        't.name as tenant_name'
+      );
+    contracts.push(...extra);
+  }
 
   const groups = new Map();
   for (const c of contracts) {
@@ -86,7 +114,7 @@ async function repairDuplicateContractPayments({
         .select('contract_id'),
       db('payments')
         .whereIn('contract_id', ids)
-        .where({ period_year: y, payment_type: 'rent' })
+        .where({ period_year: y })
         .groupBy('contract_id')
         .count('* as c')
         .sum('amount as s')
@@ -110,34 +138,42 @@ async function repairDuplicateContractPayments({
       utilCounts.map((r) => [r.contract_id, { c: Number(r.c), s: Number(r.s || 0) }])
     );
 
-    // Canonical = most rent charges this year; tie-break lower id (usually older/register row).
-    const ranked = rows
-      .map((r) => ({
-        ...r,
-        chargeCount: chargeMap[r.id]?.c || 0,
-        chargeSum: chargeMap[r.id]?.s || 0,
-        payCount: payMap[r.id]?.c || 0,
-        paySum: payMap[r.id]?.s || 0,
-        utilCount: utilMap[r.id]?.c || 0,
-        utilSum: utilMap[r.id]?.s || 0,
-      }))
+    const enriched = rows.map((r) => ({
+      ...r,
+      live: !r.deleted_at,
+      chargeCount: chargeMap[r.id]?.c || 0,
+      chargeSum: chargeMap[r.id]?.s || 0,
+      payCount: payMap[r.id]?.c || 0,
+      paySum: payMap[r.id]?.s || 0,
+      utilCount: utilMap[r.id]?.c || 0,
+      utilSum: utilMap[r.id]?.s || 0,
+    }));
+
+    // Prefer live contracts with charges; never pick a deleted row as canonical.
+    const live = enriched.filter((r) => r.live);
+    const rankedLive = live
+      .slice()
       .sort(
         (a, b) =>
           b.chargeCount - a.chargeCount ||
           b.chargeSum - a.chargeSum ||
           a.id - b.id
       );
+    const canonical = rankedLive[0];
+    if (!canonical) continue;
 
-    const canonical = ranked[0];
-    const duplicates = ranked.slice(1);
-    if (!canonical.chargeCount && !duplicates.some((d) => d.payCount > 0)) {
-      continue; // nothing useful to merge for this year
-    }
-
-    const moveFrom = duplicates.filter(
-      (d) => d.payCount > 0 || d.chargeCount > 0 || d.utilCount > 0
+    const moveFrom = enriched.filter(
+      (d) =>
+        d.id !== canonical.id &&
+        (d.payCount > 0 || d.chargeCount > 0 || d.utilCount > 0)
     );
     if (!moveFrom.length) continue;
+
+    // Skip groups where nothing is on a non-canonical row with payments
+    // and canonical already has all payments — unless charges need merging.
+    const hasPayToMove = moveFrom.some((d) => d.payCount > 0);
+    const hasChargeToMove = moveFrom.some((d) => d.chargeCount > 0 || d.utilCount > 0);
+    if (!hasPayToMove && !hasChargeToMove) continue;
 
     const groupPlan = {
       tenantName: canonical.tenant_name,
@@ -152,6 +188,7 @@ async function repairDuplicateContractPayments({
       },
       duplicates: moveFrom.map((d) => ({
         id: d.id,
+        deleted: !d.live,
         chargeCount: d.chargeCount,
         chargeSum: roundMoney(d.chargeSum),
         payCount: d.payCount,
@@ -163,24 +200,20 @@ async function repairDuplicateContractPayments({
     };
 
     for (const dup of moveFrom) {
-      if (dup.id === canonical.id) continue;
-
-      const rentPays = await db('payments')
+      const allPays = await db('payments')
         .where({ contract_id: dup.id })
         .select('id', 'payment_type', 'period_year', 'period_month', 'amount');
-      const utilPays = rentPays.filter((p) => p.payment_type === 'utilities');
-      const onlyRent = rentPays.filter((p) => p.payment_type === 'rent');
-      // Move ALL payment types for this contract to keep tenant ledger consistent.
-      if (rentPays.length) {
+      if (allPays.length) {
+        const rentPays = allPays.filter((p) => p.payment_type === 'rent');
         groupPlan.actions.push({
           type: 'move_payments',
           fromContractId: dup.id,
           toContractId: canonical.id,
-          count: rentPays.length,
-          rentCount: onlyRent.length,
-          utilCount: utilPays.length,
-          rentSum: roundMoney(onlyRent.reduce((s, p) => s + Number(p.amount || 0), 0)),
-          sample: onlyRent.slice(0, 5).map((p) => ({
+          fromDeleted: !dup.live,
+          count: allPays.length,
+          rentCount: rentPays.length,
+          rentSum: roundMoney(rentPays.reduce((s, p) => s + Number(p.amount || 0), 0)),
+          sample: rentPays.slice(0, 5).map((p) => ({
             id: p.id,
             month: p.period_month,
             amount: Number(p.amount),
@@ -190,16 +223,13 @@ async function repairDuplicateContractPayments({
           await db('payments').where({ contract_id: dup.id }).update({
             contract_id: canonical.id,
             tenant_id: canonical.tenant_id,
+            property_id: pid,
             updated_at: db.fn.now(),
           });
-          paymentsMoved += rentPays.length;
-        } else {
-          paymentsMoved += rentPays.length;
         }
+        paymentsMoved += allPays.length;
       }
 
-      // If duplicate also has charges for this year, move them only when canonical
-      // does not already have the same period (avoid double-counting).
       const dupCharges = await db('rent_charges')
         .where({ contract_id: dup.id, period_year: y })
         .whereNot('status', 'cancelled')
@@ -235,10 +265,8 @@ async function repairDuplicateContractPayments({
                 tenant_id: canonical.tenant_id,
                 updated_at: db.fn.now(),
               });
-            chargesMoved += toMove.length;
-          } else {
-            chargesMoved += toMove.length;
           }
+          chargesMoved += toMove.length;
         }
         if (toCancel.length) {
           groupPlan.actions.push({
@@ -285,18 +313,18 @@ async function repairDuplicateContractPayments({
               tenant_id: canonical.tenant_id,
               updated_at: db.fn.now(),
             });
-          utilChargesMoved += dupUtils.length;
-        } else {
-          utilChargesMoved += dupUtils.length;
         }
+        utilChargesMoved += dupUtils.length;
       }
 
-      // Soft-delete duplicate contract if it no longer holds payments/charges for any year
-      // (only when applying). Keep it if still referenced elsewhere.
-      if (!dryRun) {
+      if (!dryRun && dup.live) {
         const [leftPay, leftRent, leftUtil, leftRooms] = await Promise.all([
           db('payments').where({ contract_id: dup.id }).count('* as c').first(),
-          db('rent_charges').where({ contract_id: dup.id }).whereNot('status', 'cancelled').count('* as c').first(),
+          db('rent_charges')
+            .where({ contract_id: dup.id })
+            .whereNot('status', 'cancelled')
+            .count('* as c')
+            .first(),
           db('utility_charges').where({ contract_id: dup.id }).count('* as c').first(),
           db('contract_rooms').where({ contract_id: dup.id }).count('* as c').first(),
         ]);
@@ -331,7 +359,7 @@ async function repairDuplicateContractPayments({
     year: y,
     dryRun,
     groupsTotal,
-    groupsScanned: multi.length,
+    groupsScanned: planned.length,
     groupsChanged: planned.length,
     paymentsMoved,
     chargesMoved,
