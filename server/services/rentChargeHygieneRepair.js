@@ -126,34 +126,38 @@ async function repairRentChargeHygiene({
   actions.push({ type: 'cancel_identical_duplicate_charges', count: dupIds.length });
   const dupN = await cancelByIds(dupIds, dryRun, 'rent_charge_hygiene_identical_dup');
 
-  // 6) Limited merge of leftover live duplicate contract numbers
-  const merge = await repairDuplicateContractPayments({
-    propertyId: pid,
-    year: y,
-    dryRun,
-    limit: mergeLimit,
-  });
-  actions.push({
-    type: 'duplicate_contract_merge',
-    groupsChanged: merge.groupsChanged,
-    paymentsMoved: merge.paymentsMoved,
-    sample: (merge.planned || []).slice(0, 15).map((p) => ({
-      tenantName: p.tenantName,
-      contractNumber: p.contractNumber,
-      canonicalId: p.canonicalId,
-      actionTypes: p.actions.map((a) => a.type),
-    })),
-  });
-
+  // 6) Optional limited merge of leftover live duplicate contract numbers
   let postMergeCancelled = 0;
-  if (!dryRun) {
-    const leftover = await db('rent_charges as rc')
-      .join('contracts as c', 'c.id', 'rc.contract_id')
-      .where({ 'rc.property_id': pid, 'rc.period_year': y })
-      .whereNotNull('c.deleted_at')
-      .whereNot('rc.status', 'cancelled')
-      .pluck('rc.id');
-    postMergeCancelled = await cancelByIds(leftover, false, 'rent_charge_hygiene_post_merge');
+  if (Number(mergeLimit) > 0) {
+    const merge = await repairDuplicateContractPayments({
+      propertyId: pid,
+      year: y,
+      dryRun,
+      limit: Number(mergeLimit),
+    });
+    actions.push({
+      type: 'duplicate_contract_merge',
+      groupsChanged: merge.groupsChanged,
+      paymentsMoved: merge.paymentsMoved,
+      sample: (merge.planned || []).slice(0, 15).map((p) => ({
+        tenantName: p.tenantName,
+        contractNumber: p.contractNumber,
+        canonicalId: p.canonicalId,
+        actionTypes: p.actions.map((a) => a.type),
+      })),
+    });
+
+    if (!dryRun) {
+      const leftover = await db('rent_charges as rc')
+        .join('contracts as c', 'c.id', 'rc.contract_id')
+        .where({ 'rc.property_id': pid, 'rc.period_year': y })
+        .whereNotNull('c.deleted_at')
+        .whereNot('rc.status', 'cancelled')
+        .pluck('rc.id');
+      postMergeCancelled = await cancelByIds(leftover, false, 'rent_charge_hygiene_post_merge');
+    }
+  } else {
+    actions.push({ type: 'duplicate_contract_merge', skipped: true });
   }
 
   const monthTotalsAfter = await db('rent_charges as rc')
