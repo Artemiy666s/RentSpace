@@ -229,6 +229,43 @@ router.get(
       .sum('rc.amount_with_vat as sampleAmount')
       .count('* as months');
 
+    const focusContractIds = [
+      ...new Set(
+        focusMonths.flatMap((m) => (focus[m]?.contributors || []).map((c) => c.contractId))
+      ),
+    ];
+    const focusContracts = focusContractIds.length
+      ? await db('contracts as c')
+          .join('tenants as t', 't.id', 'c.tenant_id')
+          .whereIn('c.id', focusContractIds)
+          .select('c.id as contractId', 'c.tenant_id as tenantId', 't.name as tenantName')
+      : [];
+    const focusTenantIds = [...new Set(focusContracts.map((c) => c.tenantId))];
+
+    const paymentsOnContracts = focusContractIds.length
+      ? await db('payments')
+          .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+          .whereIn('contract_id', focusContractIds)
+          .select('contract_id', 'period_month', 'amount', 'payment_date', 'id')
+          .orderBy(['contract_id', 'period_month'])
+      : [];
+    const paymentsOnTenantsAnyContract = focusTenantIds.length
+      ? await db('payments as p')
+          .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+          .where({ 'p.property_id': propertyId, 'p.period_year': year, 'p.payment_type': 'rent' })
+          .whereIn('p.tenant_id', focusTenantIds)
+          .select(
+            'p.id',
+            'p.tenant_id',
+            'p.contract_id',
+            'p.period_month',
+            'p.amount',
+            'p.payment_date',
+            'c.contract_number'
+          )
+          .orderBy(['p.tenant_id', 'p.period_month'])
+      : [];
+
     res.json({
       success: true,
       data: {
@@ -243,6 +280,9 @@ router.get(
         yearRentPayments: paySum,
         dueRentCharges: chargeSum,
         chargesNear4891: near4891,
+        focusContracts,
+        paymentsOnContracts,
+        paymentsOnTenantsAnyContract,
         topDebtors: debtors
           .slice()
           .sort((a, b) => Number(b.debt) - Number(a.debt))
