@@ -355,14 +355,44 @@ router.get(
     for (const t of tenants) {
       const contracts = await db('contracts')
         .where({ tenant_id: t.id, property_id: propertyId })
-        .select('id', 'contract_number', 'status', 'deleted_at');
+        .select(
+          'id',
+          'contract_number',
+          'status',
+          'deleted_at',
+          'rate_without_vat',
+          'area'
+        );
       const ids = contracts.map((c) => c.id);
+      const rooms = ids.length
+        ? await db('contract_rooms as cr')
+            .leftJoin('rooms as r', 'r.id', 'cr.room_id')
+            .whereIn('cr.contract_id', ids)
+            .select(
+              'cr.id as linkId',
+              'cr.contract_id',
+              'cr.room_id',
+              'cr.area as linkArea',
+              'cr.rate_without_vat as linkRate',
+              'r.room_number',
+              'r.status as roomStatus'
+            )
+            .orderBy(['cr.contract_id', 'cr.id'])
+        : [];
       const charges = ids.length
         ? await db('rent_charges')
             .whereIn('contract_id', ids)
             .where({ period_year: year })
             .whereNot('status', 'cancelled')
-            .select('contract_id', 'period_month', 'amount_with_vat', 'status')
+            .select(
+              'contract_id',
+              'period_month',
+              'amount_with_vat',
+              'amount_without_vat',
+              'rate_without_vat',
+              'area',
+              'status'
+            )
             .orderBy(['contract_id', 'period_month'])
         : [];
       const utilCharges = ids.length
@@ -388,6 +418,7 @@ router.get(
         tenantId: t.id,
         tenantName: t.name,
         contracts,
+        rooms,
         charges,
         utilCharges,
         payments: pays,

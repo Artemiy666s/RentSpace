@@ -162,18 +162,30 @@ async function repairDuplicateContractPayments({
     const canonical = rankedLive[0];
     if (!canonical) continue;
 
+    const roomCounts = await db('contract_rooms')
+      .whereIn(
+        'contract_id',
+        enriched.map((r) => r.id)
+      )
+      .groupBy('contract_id')
+      .count('* as c')
+      .select('contract_id');
+    const roomMap = Object.fromEntries(roomCounts.map((r) => [r.contract_id, Number(r.c)]));
+    for (const row of enriched) row.roomCount = roomMap[row.id] || 0;
+
     const moveFrom = enriched.filter(
       (d) =>
         d.id !== canonical.id &&
-        (d.payCount > 0 || d.chargeCount > 0 || d.utilCount > 0)
+        (d.payCount > 0 || d.chargeCount > 0 || d.utilCount > 0 || (d.live && d.roomCount > 0))
     );
     if (!moveFrom.length) continue;
 
     // Skip groups where nothing is on a non-canonical row with payments
-    // and canonical already has all payments — unless charges need merging.
+    // and canonical already has all payments — unless charges/rooms need merging.
     const hasPayToMove = moveFrom.some((d) => d.payCount > 0);
     const hasChargeToMove = moveFrom.some((d) => d.chargeCount > 0 || d.utilCount > 0);
-    if (!hasPayToMove && !hasChargeToMove) continue;
+    const hasRoomStub = moveFrom.some((d) => d.live && d.roomCount > 0);
+    if (!hasPayToMove && !hasChargeToMove && !hasRoomStub) continue;
 
     const groupPlan = {
       tenantName: canonical.tenant_name,
@@ -317,31 +329,165 @@ async function repairDuplicateContractPayments({
         utilChargesMoved += dupUtils.length;
       }
 
-      if (!dryRun && dup.live) {
-        const [leftPay, leftRent, leftUtil, leftRooms] = await Promise.all([
-          db('payments').where({ contract_id: dup.id }).count('* as c').first(),
-          db('rent_charges')
-            .where({ contract_id: dup.id })
+      // Stub duplicates with no remaining live money still pollute the register
+      // via contract_rooms. Detach rooms that already exist on canonical, move
+      // unique rooms onto canonical, then soft-delete the stub.
+      const [leftPay, leftRent, leftUtil] = await Promise.all([
+        db('payments').where({ contract_id: dup.id }).count('* as c').first(),
+        db('rent_charges')
+          .where({ contract_id: dup.id })
+          .whereNot('status', 'cancelled')
+          .count('* as c')
+          .first(),
+        db('utility_charges').where({ contract_id: dup.id }).count('* as c').first(),
+      ]);
+      const cancelledThisDup = groupPlan.actions
+        .filter(
+          (a) =>
+            a.type === 'cancel_duplicate_rent_charges' && a.fromContractId === dup.id
+        )
+        .reduce((s, a) => s + Number(a.count || 0), 0);
+      const movedPaysThisDup = groupPlan.actions.some(
+        (a) => a.type === 'move_payments' && a.fromContractId === dup.id
+      );
+      const movedUtilThisDup = groupPlan.actions.some(
+        (a) => a.type === 'move_utility_charges' && a.fromContractId === dup.id
+      );
+      const rentLeft = Math.max(0, Number(leftRent?.c || 0) - (dryRun ? cancelledThisDup : 0));
+      const payLeft = dryRun && movedPaysThisDup ? 0 : Number(leftPay?.c || 0);
+      const utilLeft = dryRun && movedUtilThisDup ? 0 : Number(leftUtil?.c || 0);
+      const moneyLeft = payLeft > 0 || rentLeft > 0 || utilLeft > 0;
+
+      if (!moneyLeft && dup.live) {
+        const dupRooms = await db('contract_rooms')
+          .where({ contract_id: dup.id })
+          .select('id', 'room_id', 'area', 'rate_without_vat');
+        if (dupRooms.length) {
+          const canonicalRoomIds = new Set(
+            (
+              await db('contract_rooms').where({ contract_id: canonical.id }).select('room_id')
+            ).map((r) => Number(r.room_id))
+          );
+          const toMove = dupRooms.filter((r) => !canonicalRoomIds.has(Number(r.room_id)));
+          const toDetach = dupRooms.filter((r) => canonicalRoomIds.has(Number(r.room_id)));
+          if (toMove.length) {
+            groupPlan.actions.push({
+              type: 'move_contract_rooms',
+              fromContractId: dup.id,
+              toContractId: canonical.id,
+              count: toMove.length,
+              roomIds: toMove.map((r) => r.room_id),
+            });
+            if (!dryRun) {
+              await db('contract_rooms')
+                .whereIn(
+                  'id',
+                  toMove.map((r) => r.id)
+                )
+                .update({ contract_id: canonical.id, updated_at: db.fn.now() });
+            }
+          }
+          if (toDetach.length) {
+            groupPlan.actions.push({
+              type: 'detach_duplicate_contract_rooms',
+              fromContractId: dup.id,
+              count: toDetach.length,
+              roomIds: toDetach.map((r) => r.room_id),
+            });
+            if (!dryRun) {
+              await db('contract_rooms')
+                .whereIn(
+                  'id',
+                  toDetach.map((r) => r.id)
+                )
+                .delete();
+            }
+          }
+        }
+
+        // If canonical has no rate, prefer the rate already baked into its
+        // charges (source of truth for accruals), then its rooms, then stub.
+        const canonicalRow = await db('contracts').where({ id: canonical.id }).first();
+        const canonRate = Number(canonicalRow?.rate_without_vat || 0);
+        if (!canonRate) {
+          let rate = 0;
+          let rateSource = null;
+          const chargeRate = await db('rent_charges')
+            .where({ contract_id: canonical.id, period_year: y })
             .whereNot('status', 'cancelled')
-            .count('* as c')
-            .first(),
-          db('utility_charges').where({ contract_id: dup.id }).count('* as c').first(),
-          db('contract_rooms').where({ contract_id: dup.id }).count('* as c').first(),
-        ]);
-        const empty =
-          Number(leftPay?.c || 0) === 0 &&
-          Number(leftRent?.c || 0) === 0 &&
-          Number(leftUtil?.c || 0) === 0 &&
-          Number(leftRooms?.c || 0) === 0;
-        if (empty) {
+            .whereNotNull('rate_without_vat')
+            .where('rate_without_vat', '>', 0)
+            .avg('rate_without_vat as r')
+            .first();
+          if (Number(chargeRate?.r || 0) > 0) {
+            rate = Number(chargeRate.r);
+            rateSource = 'canonical_charges';
+          }
+          if (!rate) {
+            const roomRate = await db('contract_rooms')
+              .where({ contract_id: canonical.id })
+              .whereNotNull('rate_without_vat')
+              .where('rate_without_vat', '>', 0)
+              .avg('rate_without_vat as r')
+              .first();
+            if (Number(roomRate?.r || 0) > 0) {
+              rate = Number(roomRate.r);
+              rateSource = 'canonical_rooms';
+            }
+          }
+          if (!rate) {
+            const dupRateRow = await db('contracts').where({ id: dup.id }).first();
+            if (Number(dupRateRow?.rate_without_vat || 0) > 0) {
+              rate = Number(dupRateRow.rate_without_vat);
+              rateSource = 'duplicate_contract';
+            }
+          }
+          if (!rate) {
+            const dupRoomRate = await db('contract_rooms')
+              .where({ contract_id: dup.id })
+              .whereNotNull('rate_without_vat')
+              .where('rate_without_vat', '>', 0)
+              .avg('rate_without_vat as r')
+              .first();
+            if (Number(dupRoomRate?.r || 0) > 0) {
+              rate = Number(dupRoomRate.r);
+              rateSource = 'duplicate_rooms';
+            }
+          }
+          if (rate > 0) {
+            groupPlan.actions.push({
+              type: 'restore_canonical_rate',
+              contractId: canonical.id,
+              rateWithoutVat: roundMoney(rate),
+              source: rateSource,
+            });
+            if (!dryRun) {
+              await db('contracts').where({ id: canonical.id }).update({
+                rate_without_vat: roundMoney(rate),
+                updated_at: db.fn.now(),
+              });
+              await db('contract_rooms')
+                .where({ contract_id: canonical.id })
+                .where(function () {
+                  this.whereNull('rate_without_vat').orWhere('rate_without_vat', 0);
+                })
+                .update({
+                  rate_without_vat: roundMoney(rate),
+                  updated_at: db.fn.now(),
+                });
+            }
+          }
+        }
+
+        groupPlan.actions.push({
+          type: 'soft_delete_duplicate_contract',
+          contractId: dup.id,
+        });
+        if (!dryRun) {
           await db('contracts').where({ id: dup.id }).update({
             status: 'terminated',
             deleted_at: db.fn.now(),
             updated_at: db.fn.now(),
-          });
-          groupPlan.actions.push({
-            type: 'soft_delete_duplicate_contract',
-            contractId: dup.id,
           });
         }
       }
