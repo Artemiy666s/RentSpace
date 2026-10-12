@@ -8,8 +8,6 @@ export const be: TranslationTree = {
     oldest: 'Спачатку старыя',
     nameAsc: 'Па назве А→Я',
     nameDesc: 'Па назве Я→А',
-    debtHigh: 'Па запазычанасці вышэй → ніжэй',
-    debtLow: 'Па запазычанасці ніжэй → вышэй',
     columnHint: 'Націсніце загаловак слупка для сартавання',
   },
   validation: {
@@ -624,7 +622,6 @@ export const be: TranslationTree = {
     viewClassic: 'Звычайная табліца',
     viewSplit: 'Арэнда / камун.',
     viewLabel: 'Выгляд табліцы',
-    resizeRows: 'Пацягніце, каб змяніць вышыню радкоў',
     totalRow: 'РАЗАМ',
   },
   tenants: {

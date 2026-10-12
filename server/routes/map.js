@@ -433,44 +433,112 @@ async function loadActiveLeasesByRoomIds(roomIds) {
   const ids = [...new Set((roomIds || []).map((id) => Number(id)).filter(Boolean))];
   if (!ids.length) return new Map();
   const asOf = require('dayjs')().format('YYYY-MM-DD');
-
-  // Hot path: direct links + charges already on these room_ids. No N+1, no writes.
-  const [rows, fromCharges] = await Promise.all([
-    db('contract_rooms as cr')
-      .join('contracts as c', 'c.id', 'cr.contract_id')
-      .join('tenants as t', 't.id', 'c.tenant_id')
-      .whereIn('cr.room_id', ids)
-      .whereIn('c.status', ['active', 'expiring'])
-      .whereNull('c.deleted_at')
-      .whereNull('t.deleted_at')
-      .where(function () {
-        this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-      })
-      .select(
-        'cr.room_id',
-        't.id as tenant_id',
-        't.name as tenant_name',
-        'c.id as contract_id',
-        'c.status as contract_status'
-      )
-      .orderBy('cr.id', 'asc'),
-    require('../services/roomChargeLeaseService')
-      .loadLeasesFromRoomCharges(ids, { byArea: false })
-      .catch(() => new Map()),
-  ]);
-
+  const rows = await db('contract_rooms as cr')
+    .join('contracts as c', 'c.id', 'cr.contract_id')
+    .join('tenants as t', 't.id', 'c.tenant_id')
+    .whereIn('cr.room_id', ids)
+    .whereIn('c.status', ['active', 'expiring'])
+    .whereNull('c.deleted_at')
+    .whereNull('t.deleted_at')
+    .where(function () {
+      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+    })
+    .select(
+      'cr.room_id',
+      't.id as tenant_id',
+      't.name as tenant_name',
+      'c.id as contract_id',
+      'c.status as contract_status'
+    )
+    .orderBy('cr.id', 'asc');
   const map = new Map();
   for (const row of rows) {
     const rid = Number(row.room_id);
     if (!map.has(rid)) map.set(rid, row);
   }
-  for (const [roomId, lease] of fromCharges) {
-    if (!map.has(roomId)) map.set(roomId, lease);
-  }
 
-  // Do NOT auto-write contract_rooms from area heuristics here:
-  // similar areas (≈33–34 м²) belong to different tenants and caused wrong labels.
-  // Display-only: direct links + charges already posted on this room_id.
+  // Orphan occupied rooms: status/rate on the map room, lease still on реестр room.
+  const missing = ids.filter((id) => !map.has(id));
+  if (missing.length) {
+    const orphans = await db('rooms')
+      .whereIn('id', missing)
+      .whereIn('status', ['occupied', 'debt'])
+      .whereNull('deleted_at')
+      .select(
+        'id',
+        'property_id',
+        'building_id',
+        'floor_id',
+        'area',
+        'rentable_area',
+        'current_rate_without_vat'
+      );
+
+    const resolveRegistryLease = async (propertyId, area, rate) => {
+      if (!area) return null;
+      return db('contract_rooms as cr')
+        .join('contracts as c', 'c.id', 'cr.contract_id')
+        .join('tenants as t', 't.id', 'c.tenant_id')
+        .join('rooms as rr', 'rr.id', 'cr.room_id')
+        .join('floors as f', 'f.id', 'rr.floor_id')
+        .where('c.property_id', propertyId)
+        .whereIn('c.status', ['active', 'expiring'])
+        .whereNull('c.deleted_at')
+        .whereNull('t.deleted_at')
+        .where(function () {
+          this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+        })
+        .where(function () {
+          this.where('rr.room_number', 'like', 'Р%').orWhere('f.name', 'like', '%реестр%');
+        })
+        .whereRaw('ABS(cr.area - ?) <= 0.35', [area])
+        .modify((qb) => {
+          if (rate > 0) {
+            qb.whereRaw(
+              'ABS(COALESCE(cr.rate_without_vat, c.rate_without_vat, 0) - ?) <= 0.05',
+              [rate]
+            );
+          }
+        })
+        .select(
+          't.id as tenant_id',
+          't.name as tenant_name',
+          'c.id as contract_id',
+          'c.status as contract_status'
+        )
+        .orderBy('cr.id', 'asc')
+        .first();
+    };
+
+    // 1) Per-room area match against реестр links
+    for (const room of orphans) {
+      const area = Number(room.rentable_area || room.area || 0);
+      const rate = Number(room.current_rate_without_vat || 0);
+      const hit = await resolveRegistryLease(room.property_id, area, rate);
+      if (hit) map.set(Number(room.id), hit);
+    }
+
+    // 2) Shared contract: several orphans on same floor/rate ↔ one реестр row with sum area
+    const still = orphans.filter((r) => !map.has(Number(r.id)));
+    const groups = new Map();
+    for (const room of still) {
+      const rate = Number(room.current_rate_without_vat || 0).toFixed(2);
+      const key = `${room.property_id}:${room.floor_id}:${rate}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(room);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const total = group.reduce(
+        (s, r) => s + Number(r.rentable_area || r.area || 0),
+        0
+      );
+      const rate = Number(group[0].current_rate_without_vat || 0);
+      const hit = await resolveRegistryLease(group[0].property_id, total, rate);
+      if (!hit) continue;
+      for (const room of group) map.set(Number(room.id), hit);
+    }
+  }
 
   return map;
 }
@@ -494,11 +562,6 @@ async function buildPlanPayload(plan, floorId) {
   if (!plan) {
     return { plan: null, shapes: [], rooms: [], floorRooms: [] };
   }
-
-  // One-shot known corrections (e.g. 11а → Медведская). Idempotent; no area guessing.
-  await require('../services/knownLeaseCorrections')
-    .ensureKnownLeaseCorrections()
-    .catch(() => {});
 
   const [shapes, floorRooms] = await Promise.all([
     db('room_shapes as rs')

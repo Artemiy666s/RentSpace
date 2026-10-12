@@ -10,7 +10,6 @@ const {
   getRoomHistory,
   updateRoomLease,
   changeRoomTenant,
-  relinkRoomToContract,
 } = require('../services/roomService');
 const asyncHandler = require('../utils/asyncHandler');
 const { ok, fail } = require('../utils/response');
@@ -74,31 +73,12 @@ router.get(
           .orWhere('active_lease.tenant_name', 'like', s);
       });
     }
-    const rows = await q.orderBy('r.room_number');
-    const orphanIds = rows
-      .filter((r) => !r.tenant_name && ['occupied', 'debt'].includes(r.status))
-      .map((r) => r.id);
-    let chargeLeases = new Map();
-    if (orphanIds.length) {
-      const { loadLeasesFromRoomCharges } = require('../services/roomChargeLeaseService');
-      chargeLeases = await loadLeasesFromRoomCharges(orphanIds, { byArea: false });
-    }
     ok(
       res,
-      rows.map((r) => {
-        const fromCharge = chargeLeases.get(Number(r.id));
-        const tenant_name = r.tenant_name || fromCharge?.tenant_name || null;
-        const tenant_id = r.tenant_id || fromCharge?.tenant_id || null;
-        const contract_id = r.contract_id || fromCharge?.contract_id || null;
-        return {
-          ...r,
-          tenant_name,
-          tenant_id,
-          contract_id,
-          status:
-            tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
-        };
-      })
+      (await q.orderBy('r.room_number')).map((r) => ({
+        ...r,
+        status: r.tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
+      }))
     );
   })
 );
@@ -283,34 +263,6 @@ router.post(
         ip: req.ip,
       });
       ok(res, { ...result, room: await getRoomDetails(req.params.id) });
-    } catch (e) {
-      if (e.status) return fail(res, e.message, e.status);
-      throw e;
-    }
-  })
-);
-
-router.post(
-  '/:id/relink-contract',
-  requireRoles(...ROOM_WRITE_ROLES),
-  asyncHandler(async (req, res) => {
-    const room = await db('rooms').where({ id: req.params.id }).first();
-    if (!room) return fail(res, 'Помещение не найдено', 404);
-    const contractId = Number(req.body.contractId);
-    if (!contractId) return fail(res, 'Укажите contractId', 400);
-    const orgId =
-      req.user.organizationId ||
-      (await db('properties').where({ id: room.property_id }).first())?.organization_id;
-    try {
-      const details = await relinkRoomToContract({
-        roomId: Number(req.params.id),
-        contractId,
-        userId: req.user.id,
-        organizationId: orgId,
-        propertyId: room.property_id,
-        ip: req.ip,
-      });
-      ok(res, details);
     } catch (e) {
       if (e.status) return fail(res, e.message, e.status);
       throw e;

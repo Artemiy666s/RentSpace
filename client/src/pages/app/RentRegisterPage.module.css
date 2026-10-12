@@ -173,95 +173,67 @@
 
 .splitWrap {
   width: 100%;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-surface-solid, #fff);
-  position: relative;
 }
 
 .splitTable {
   width: 100%;
-  max-width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 12.5px;
-  line-height: 1.25;
-}
-
-.splitTableFixed {
-  table-layout: fixed;
-  width: 100%;
-  max-width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 720px;
 }
 
 .splitTable th,
 .splitTable td {
   border-bottom: 1px solid var(--color-border);
-  border-right: 1px solid rgba(6, 27, 51, 0.06);
-  padding: 4px 8px;
+  padding: 8px 10px;
   vertical-align: middle;
-  text-align: center;
+  text-align: left;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-height: var(--rr-row-h, 28px);
-  height: auto;
-  box-sizing: border-box;
-}
-
-.splitTable tbody td:not([rowspan]) {
-  height: var(--rr-row-h, 28px);
 }
 
 .splitTable thead th {
   background: var(--color-table-head, #f7f9fc);
   font-weight: 700;
   color: var(--color-navy, var(--color-text));
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 1;
-}
-
-.splitTable thead tr:nth-child(2) th {
-  font-size: 11px;
-  background: var(--color-table-head, #f7f9fc);
 }
 
 .monthGroup {
   text-align: center !important;
   border-left: 1px solid var(--color-border);
-  background: rgba(18, 103, 232, 0.04);
 }
 
 .subCol {
-  text-align: center !important;
+  text-align: right !important;
   font-weight: 600;
   color: var(--color-muted);
   border-left: 1px solid var(--color-border);
-  font-size: 11px;
   min-width: 72px;
 }
 
 .indicatorCol {
-  min-width: 72px;
-  width: 78px;
-  text-align: center !important;
+  min-width: 88px;
 }
 
 .indicatorCell {
-  text-align: center !important;
   font-weight: 600;
   color: var(--color-navy, var(--color-text));
-  background: rgba(18, 103, 232, 0.05);
-  font-size: 12px;
+  background: rgba(18, 103, 232, 0.04);
 }
 
 .numCol {
+  width: 48px;
   text-align: center !important;
 }
 
 .numCell {
-  text-align: center !important;
+  text-align: right !important;
   font-variant-numeric: tabular-nums;
 }
 
@@ -270,11 +242,11 @@
 }
 
 .splitRow:hover td {
-  background: rgba(18, 103, 232, 0.08) !important;
+  background: rgba(18, 103, 232, 0.06);
 }
 
 .splitRowAlt td:not(.indicatorCell) {
-  background: rgba(6, 27, 51, 0.015);
+  background: rgba(6, 27, 51, 0.02);
 }
 
 .totalRow td {
@@ -283,113 +255,13 @@
 }
 
 .totalLabel {
-  text-align: center !important;
   font-weight: 800;
 }
 
 .emptyCell {
   text-align: center !important;
   color: var(--color-muted);
-  padding: 20px 12px !important;
-  height: auto !important;
-}
-
-.splitPairAlt td {
-  background: rgba(6, 27, 51, 0.03);
-}
-
-.tenantCell {
-  text-align: center !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 600;
-}
-
-.contractCell {
-  text-align: center !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--color-muted);
-  font-size: 12px;
-}
-
-.debtCell {
-  text-align: center !important;
-  font-weight: 700;
-  border-left: 1px solid var(--color-border);
-}
-
-.thResizable {
-  position: relative;
-  text-align: center !important;
-}
-
-.colResizeHandle {
-  position: absolute;
-  top: 0;
-  right: -5px;
-  width: 10px;
-  height: 100%;
-  cursor: col-resize;
-  touch-action: none;
-  z-index: 4;
-}
-
-.colResizeHandle:after {
-  content: '';
-  position: absolute;
-  top: 15%;
-  bottom: 15%;
-  left: 4px;
-  width: 2px;
-  border-radius: 1px;
-  background: transparent;
-}
-
-.colResizeHandle:hover:after,
-.colResizeHandle:active:after {
-  background: var(--color-blue, #1267e8);
-}
-
-.splitSortBtn {
-  all: unset;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-  font-weight: 700;
-  color: inherit;
-  text-align: center;
-}
-
-.splitSortBtn:hover {
-  color: var(--color-blue, #1267e8);
-}
-
-.rowResizeBar {
-  height: 8px;
-  cursor: row-resize;
-  touch-action: none;
-  position: relative;
-}
-
-.rowResizeBar:after {
-  content: '';
-  position: absolute;
-  left: 20%;
-  right: 20%;
-  top: 3px;
-  height: 2px;
-  border-radius: 1px;
-  background: transparent;
-}
-
-.rowResizeBar:hover:after {
-  background: var(--color-blue, #1267e8);
+  padding: 24px 12px !important;
 }
 
 @media (max-width: 900px) {

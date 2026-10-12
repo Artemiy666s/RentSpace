@@ -41,62 +41,43 @@ function isRegistryRoom(room) {
 
 async function loadActiveContractCandidates(propertyId) {
   const asOf = dayjs().format('YYYY-MM-DD');
-  // One joined query instead of N+1 per contract (map load was timing out on this).
-  const rows = await db('contracts as c')
+  const contracts = await db('contracts as c')
     .join('tenants as t', 't.id', 'c.tenant_id')
-    .join('contract_rooms as cr', 'cr.contract_id', 'c.id')
-    .join('rooms as r', 'r.id', 'cr.room_id')
-    .join('floors as f', 'f.id', 'r.floor_id')
     .where('c.property_id', propertyId)
     .whereIn('c.status', ['active', 'expiring'])
     .whereNull('c.deleted_at')
     .whereNull('t.deleted_at')
-    .where(function () {
-      this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
-    })
     .select(
-      'c.id as contract_id',
+      'c.id',
       'c.contract_number',
       'c.rate_without_vat',
       'c.start_date',
       't.id as tenant_id',
-      't.name as tenant_name',
-      'cr.id as link_id',
-      'cr.room_id',
-      'cr.area as link_area',
-      'cr.rate_without_vat as link_rate',
-      'r.room_number',
-      'r.building_id',
-      'f.name as floor_name'
+      't.name as tenant_name'
     );
 
-  const byContract = new Map();
-  for (const row of rows) {
-    const cid = Number(row.contract_id);
-    if (!byContract.has(cid)) {
-      byContract.set(cid, {
-        contract: {
-          id: cid,
-          contract_number: row.contract_number,
-          rate_without_vat: row.rate_without_vat,
-          start_date: row.start_date,
-          tenant_id: row.tenant_id,
-          tenant_name: row.tenant_name,
-        },
-        links: [],
-      });
-    }
-    byContract.get(cid).links.push({
-      id: row.link_id,
-      room_id: row.room_id,
-      area: row.link_area,
-      rate_without_vat: row.link_rate,
-      room_number: row.room_number,
-      building_id: row.building_id,
-      floor_name: row.floor_name,
-    });
+  const out = [];
+  for (const contract of contracts) {
+    const links = await db('contract_rooms as cr')
+      .join('rooms as r', 'r.id', 'cr.room_id')
+      .join('floors as f', 'f.id', 'r.floor_id')
+      .where('cr.contract_id', contract.id)
+      .where(function () {
+        this.whereNull('cr.end_date').orWhere('cr.end_date', '>=', asOf);
+      })
+      .select(
+        'cr.id',
+        'cr.room_id',
+        'cr.area',
+        'cr.rate_without_vat',
+        'r.room_number',
+        'r.building_id',
+        'f.name as floor_name'
+      );
+    if (!links.length) continue;
+    out.push({ contract, links });
   }
-  return [...byContract.values()];
+  return out;
 }
 
 async function findMatchingContract(propertyId, orphans, candidates = null) {
@@ -130,35 +111,20 @@ async function findMatchingContract(propertyId, orphans, candidates = null) {
       if (orphanAreas.every((a, i) => nearly(a, linkAreas[i], 0.25))) score += 6;
     }
 
-    // Single map room matches one contract_rooms link by area (1:1 or one of many).
-    let partialLink = null;
-    if (orphans.length === 1) {
+    // Single orphan ↔ single link by area (+ rate if known)
+    if (orphans.length === 1 && links.length === 1) {
       const oa = Number(orphans[0].area || orphans[0].rentable_area || 0);
-      const areaHit = links.find((l) => nearly(oa, Number(l.area), 0.35)) || null;
-      if (areaHit) {
-        // Enough alone to pass minScore=7 even without rate/реестр naming.
-        score += 8;
-        const hitRate =
-          Number(areaHit.rate_without_vat) || Number(contract.rate_without_vat) || 0;
-        if (rate > 0 && nearly(hitRate, rate, 0.05)) score += 2;
-        else if (rate > 0 && nearly(hitRate, rate, 3)) score += 1;
-        if (isRegistryRoom(areaHit)) score += 2;
-        if (links.length > 1) partialLink = areaHit;
+      if (nearly(oa, Number(links[0].area), 0.25)) {
+        score += 3;
+        if (rate > 0 && nearly(linkRate, rate, 0.05)) score += 2;
+        if (registryOnly) score += 2;
       }
     }
 
     // Multi-room orphans should prefer aggregated area match over accidental single-room hits.
     const minScore = orphans.length > 1 ? 9 : 7;
     if (score >= minScore) {
-      scored.push({
-        contract,
-        links,
-        score,
-        linkArea,
-        linkRate,
-        registryOnly,
-        partialLink,
-      });
+      scored.push({ contract, links, score, linkArea, linkRate, registryOnly });
     }
   }
 
@@ -175,25 +141,10 @@ async function relinkContractToRooms(match, orphans) {
     Number(contract.rate_without_vat) ||
     0;
 
-  const orphanAreaSum = orphans.reduce(
-    (s, r) => s + Number(r.area || r.rentable_area || 0),
-    0
-  );
-  const linkAreaSum = links.reduce((s, l) => s + Number(l.area || 0), 0);
-  const fullReplace =
-    orphans.length === links.length || nearly(orphanAreaSum, linkAreaSum, 0.6);
-
-  // Close only the links we are replacing. For a partial match (1 м² of a
-  // multi-room contract) leave the other open links intact.
+  // Close old links (keep history) then attach map rooms.
   for (const link of links) {
     const stillMapRoom = orphans.some((r) => Number(r.id) === Number(link.room_id));
     if (stillMapRoom) continue;
-    if (!fullReplace) {
-      const replacesThis = orphans.some((r) =>
-        nearly(Number(r.area || r.rentable_area || 0), Number(link.area || 0), 0.25)
-      );
-      if (!replacesThis) continue;
-    }
     await db('contract_rooms').where({ id: link.id }).update({
       end_date: asOf,
       updated_at: db.fn.now(),
@@ -398,85 +349,6 @@ async function repairOrphanRows(rows, { dryRun }) {
   };
 }
 
-/**
- * Resolve tenant/contract for occupied map rooms that have no open contract_rooms row.
- * Returns Map<roomId, { tenant_id, tenant_name, contract_id, contract_status }>.
- * When `relink` is true, also writes contract_rooms onto those map rooms (high-confidence only).
- */
-async function resolveOrphanRoomLeases(
-  rooms,
-  { relink = false, minScore = 7, relinkMinScore = 10 } = {}
-) {
-  const list = (rooms || []).filter((r) => r && r.id);
-  const result = new Map();
-  if (!list.length) return result;
-
-  const groups = new Map();
-  for (const room of list) {
-    const rate = Number(room.current_rate_without_vat || 0).toFixed(2);
-    const key = `${room.property_id}:${room.building_id || 'x'}:${room.floor_id || 'x'}:${rate}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(room);
-  }
-
-  const usedContracts = new Set();
-  const candidatesByProperty = new Map();
-
-  async function candidatesFor(propertyId) {
-    if (!candidatesByProperty.has(propertyId)) {
-      candidatesByProperty.set(propertyId, await loadActiveContractCandidates(propertyId));
-    }
-    return candidatesByProperty.get(propertyId).filter((c) => !usedContracts.has(c.contract.id));
-  }
-
-  function toLease(match) {
-    return {
-      tenant_id: match.contract.tenant_id,
-      tenant_name: match.contract.tenant_name,
-      contract_id: match.contract.id,
-      contract_status: 'active',
-      score: match.score,
-    };
-  }
-
-  for (const group of groups.values()) {
-    const candidates = await candidatesFor(group[0].property_id);
-    const match = await findMatchingContract(group[0].property_id, group, candidates);
-
-    if (!match && group.length > 1) {
-      for (const room of group) {
-        const single = await findMatchingContract(
-          room.property_id,
-          [room],
-          await candidatesFor(room.property_id)
-        );
-        if (!single || single.score < minScore) continue;
-        // Partial one-link hits must not block the rest of the same contract.
-        if (!single.partialLink) usedContracts.add(single.contract.id);
-        result.set(Number(room.id), toLease(single));
-        if (relink && single.score >= relinkMinScore) {
-          await relinkContractToRooms(single, [room]);
-          invalidateRentRegisterCache(room.property_id);
-        }
-      }
-      continue;
-    }
-
-    if (!match || match.score < minScore) continue;
-    if (!match.partialLink) usedContracts.add(match.contract.id);
-    const lease = toLease(match);
-    for (const room of group) result.set(Number(room.id), lease);
-    if (relink && match.score >= relinkMinScore) {
-      await relinkContractToRooms(match, group);
-      invalidateRentRegisterCache(group[0].property_id);
-    }
-  }
-
-  return result;
-}
-
 module.exports = {
   repairOrphanOccupiedRooms,
-  findMatchingContract,
-  resolveOrphanRoomLeases,
 };

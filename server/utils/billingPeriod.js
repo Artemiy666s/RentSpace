@@ -1,16 +1,10 @@
 /**
  * Правила начисления (таймзона Europe/Minsk):
- * - аренда за месяц M — с 10-го числа месяца M (счета выставляются после 10-го);
- * - коммуналка за месяц M — после 15-го числа месяца M+1;
- * - задолженность по аренде — только закрытые месяцы (текущий месяц, только что
- *   выставленный с 10-го, в «долг» не входит, пока месяц не закончился).
+ * - аренда за месяц M — после 15-го числа месяца M;
+ * - коммуналка за месяц M — после 15-го числа месяца M+1.
  */
 
-const RENT_CHARGE_DAY = 10;
-const UTILITY_CHARGE_DAY = 15;
-
-/** @deprecated use RENT_CHARGE_DAY; kept for chargeService import compatibility */
-const CHARGE_DAY = RENT_CHARGE_DAY;
+const CHARGE_DAY = 15;
 
 function nowInMinsk(asOf = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-GB', {
@@ -29,28 +23,14 @@ function nowInMinsk(asOf = new Date()) {
 /**
  * До какого месяца года аренда уже начислена (включительно).
  * 0 — ещё ни одного месяца этого года.
- * Будущие месяцы никогда не входят.
  */
 function maxDueRentMonth(year, asOf = new Date()) {
   const now = nowInMinsk(asOf);
   const y = Number(year);
   if (now.year > y) return 12;
   if (now.year < y) return 0;
-  if (now.day >= RENT_CHARGE_DAY) return now.month;
+  if (now.day >= CHARGE_DAY) return now.month;
   return now.month - 1;
-}
-
-/**
- * До какого месяца года аренда считается просроченной задолженностью (включительно).
- * Текущий календарный месяц не входит: счёт уже выставлен с 10-го, но это ещё не «долг».
- * 0 — в этом году просроченных месяцев ещё нет.
- */
-function maxDebtRentMonth(year, asOf = new Date()) {
-  const now = nowInMinsk(asOf);
-  const y = Number(year);
-  if (now.year > y) return 12;
-  if (now.year < y) return 0;
-  return Math.max(0, now.month - 1);
 }
 
 /**
@@ -60,7 +40,7 @@ function maxDueUtilityMonth(year, asOf = new Date()) {
   const now = nowInMinsk(asOf);
   // После 15-го видны месяцы до (текущий − 1), до 15-го — до (текущий − 2).
   let dueYear = now.year;
-  let dueMonth = now.day >= UTILITY_CHARGE_DAY ? now.month - 1 : now.month - 2;
+  let dueMonth = now.day >= CHARGE_DAY ? now.month - 1 : now.month - 2;
   if (dueMonth <= 0) {
     dueMonth += 12;
     dueYear -= 1;
@@ -72,10 +52,7 @@ function maxDueUtilityMonth(year, asOf = new Date()) {
 
 module.exports = {
   CHARGE_DAY,
-  RENT_CHARGE_DAY,
-  UTILITY_CHARGE_DAY,
   nowInMinsk,
   maxDueRentMonth,
-  maxDebtRentMonth,
   maxDueUtilityMonth,
 };

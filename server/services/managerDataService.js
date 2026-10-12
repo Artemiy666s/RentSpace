@@ -1,7 +1,7 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
+const { maxDueRentMonth } = require('../utils/billingPeriod');
 const { lastDueRentYm, ensureDueRentCharges } = require('./chargeService');
-const { maxDueRentMonth, maxDebtRentMonth } = require('../utils/billingPeriod');
 const { cacheWrap, cacheDelPrefix } = require('../utils/ttlCache');
 
 const MONTH_NAMES = [
@@ -149,24 +149,7 @@ async function listRoomsTable(query, orgId) {
 
   const rows = await q.orderBy(['b.name', 'f.level_number', 'r.room_number']);
 
-  // Fill tenant from charges when lease join is empty but room already has accruals.
-  const orphanIds = rows
-    .filter(
-      (r) =>
-        !r.tenant_name &&
-        (['occupied', 'debt'].includes(r.status) || Number(r.rent_charged || 0) > 0)
-    )
-    .map((r) => r.id);
-  let chargeLeases = new Map();
-  if (orphanIds.length) {
-    const { loadLeasesFromRoomCharges } = require('./roomChargeLeaseService');
-    // Fast path only — table list must stay light.
-    chargeLeases = await loadLeasesFromRoomCharges(orphanIds, { byArea: false });
-  }
-
   return rows.map((r) => {
-    const fromCharge = chargeLeases.get(Number(r.id));
-    const tenantName = r.tenant_name || fromCharge?.tenant_name || null;
     const rate = Number(r.cr_rate || r.current_rate_without_vat || r.recommended_rate_without_vat || 0);
     const vat = Number(r.vat_rate || 20);
     const rentCharged = Number(r.rent_charged || 0);
@@ -183,9 +166,9 @@ async function listRoomsTable(query, orgId) {
       area: Number(r.area),
       rentableArea: Number(r.rentable_area || r.area),
       status:
-        tenantName && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
+        r.tenant_name && !['occupied', 'debt'].includes(r.status) ? 'occupied' : r.status,
       roomType: r.room_type,
-      tenantName,
+      tenantName: r.tenant_name,
       tenantUnp: r.unp,
       contractNumber: r.contract_number,
       contractDate: r.contract_date,
@@ -243,12 +226,11 @@ async function listTenantsTable(query, orgId) {
 
 async function computeContractsDebt(propertyId, year, contractIds) {
   if (!contractIds.length) return {};
-  const dueThrough = maxDebtRentMonth(year);
+  const dueThrough = maxDueRentMonth(year);
   if (dueThrough <= 0) {
     return Object.fromEntries(contractIds.map((id) => [id, 0]));
   }
 
-  // Просрочка — только закрытые месяцы (текущий выставленный месяц в долг не входит).
   const rentRows = await db('rent_charges')
     .where({ property_id: propertyId, period_year: year })
     .whereNot('status', 'cancelled')
@@ -581,7 +563,7 @@ async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
   const ensureCharges = options.ensureCharges !== false;
   // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
-  const cacheKey = `rent-register:v5:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
+  const cacheKey = `rent-register:v3:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
@@ -591,22 +573,10 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:${propertyId}:`);
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
-    cacheDelPrefix(`rent-register:v4:${propertyId}:`);
-    cacheDelPrefix(`rent-register:v5:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
-    cacheDelPrefix(`dashboard:v2:${propertyId}:`);
-    cacheDelPrefix(`dashboard:v3:${propertyId}:`);
-    cacheDelPrefix(`dashboard:v4:${propertyId}:`);
-    cacheDelPrefix(`dashboard:v5:${propertyId}:`);
-    cacheDelPrefix(`dashboard:v6:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
     cacheDelPrefix('dashboard:v1:');
-    cacheDelPrefix('dashboard:v2:');
-    cacheDelPrefix('dashboard:v3:');
-    cacheDelPrefix('dashboard:v4:');
-    cacheDelPrefix('dashboard:v5:');
-    cacheDelPrefix('dashboard:v6:');
   }
 }
 
@@ -704,7 +674,7 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     utilPaidMap[key] = Number(row.total);
   }
 
-  const dueThrough = maxDebtRentMonth(year);
+  const dueThrough = maxDueRentMonth(year);
 
   return links.map((row, idx) => {
     const months = {};
@@ -721,10 +691,10 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
-      // В долг — только закрытые месяцы. Текущий (уже выставленный с 10-го) — ещё не просрочка.
       if (m <= dueThrough) dueRent += months[m].rent;
     }
     const paid = paidMap[row.contract_id] || 0;
+    // Задолженность = аренда только по уже начисленным месяцам − оплаты аренды за год.
     const debt = Math.max(0, dueRent - paid);
     const contractNumber = row.contract_number || '';
     const contractDate = toDateInput(row.contract_date);
@@ -921,63 +891,6 @@ async function upsertRegisterUtilityPaid(contract, year, month, amount, userId) 
   });
 }
 
-async function upsertRegisterRentPaid(contract, year, month, amount, userId) {
-  const existing = await db('payments')
-    .where({
-      contract_id: contract.id,
-      period_year: year,
-      period_month: month,
-      payment_type: 'rent',
-    })
-    .orderBy('id', 'asc');
-
-  if (!amount || amount <= 0) {
-    if (existing.length) {
-      await db('payments')
-        .whereIn(
-          'id',
-          existing.map((p) => p.id)
-        )
-        .delete();
-    }
-    return;
-  }
-
-  const rounded = Math.round(Number(amount) * 100) / 100;
-  const paymentDate = `${year}-${String(month).padStart(2, '0')}-10`;
-  if (existing.length) {
-    const [first, ...rest] = existing;
-    await db('payments').where({ id: first.id }).update({
-      amount: rounded,
-      payment_date: first.payment_date || paymentDate,
-      updated_at: db.fn.now(),
-    });
-    if (rest.length) {
-      await db('payments')
-        .whereIn(
-          'id',
-          rest.map((p) => p.id)
-        )
-        .delete();
-    }
-    return;
-  }
-
-  await db('payments').insert({
-    organization_id: contract.organization_id,
-    property_id: contract.property_id,
-    tenant_id: contract.tenant_id,
-    contract_id: contract.id,
-    payment_date: paymentDate,
-    amount: rounded,
-    payment_type: 'rent',
-    period_year: year,
-    period_month: month,
-    purpose: 'Арендная оплата (реестр)',
-    created_by: userId || null,
-  });
-}
-
 async function updateRentRegisterRow(contractId, body, userId) {
   const contract = await db('contracts').where({ id: contractId }).whereNull('deleted_at').first();
   if (!contract) {
@@ -1054,9 +967,6 @@ async function updateRentRegisterRow(contractId, body, userId) {
       if (!month || month < 1 || month > 12 || !vals) continue;
       if ('rent' in vals) {
         await upsertRegisterRentCharge(chargeContract, roomId, year, month, Number(vals.rent) || 0, userId);
-      }
-      if ('paid' in vals) {
-        await upsertRegisterRentPaid(chargeContract, year, month, Number(vals.paid) || 0, userId);
       }
       if ('utility' in vals) {
         await upsertRegisterUtilityCharge(chargeContract, year, month, Number(vals.utility) || 0, userId);

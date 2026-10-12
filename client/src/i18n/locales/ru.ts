@@ -8,8 +8,6 @@ export const ru: TranslationTree = {
     oldest: 'Сначала старые',
     nameAsc: 'По названию А→Я',
     nameDesc: 'По названию Я→А',
-    debtHigh: 'По задолженности выше → ниже',
-    debtLow: 'По задолженности ниже → выше',
     columnHint: 'Нажмите заголовок столбца для сортировки по возрастанию и убыванию',
   },
   validation: {
@@ -625,7 +623,6 @@ export const ru: TranslationTree = {
     viewClassic: 'Обычная таблица',
     viewSplit: 'Аренда / коммун.',
     viewLabel: 'Вид таблицы',
-    resizeRows: 'Потяните, чтобы изменить высоту строк',
     totalRow: 'ИТОГО',
   },
   tenants: {
