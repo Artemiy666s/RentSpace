@@ -154,18 +154,35 @@ async function repairRentChargeHygiene({
     .min('period_month as min_m')
     .max('period_month as max_m')
     .sum('amount_with_vat as s');
+  const byContract = Object.fromEntries(chargeMeta.map((r) => [r.contract_id, r]));
+  const liveByKey = new Map();
+  for (const c of liveContracts) {
+    const key = `${c.tenant_id}::${String(c.contract_number || '')
+      .trim()
+      .toLowerCase()}`;
+    if (!liveByKey.has(key)) liveByKey.set(key, []);
+    liveByKey.get(key).push(c);
+  }
   const stubChargeIds = [];
   const stubContractIds = [];
-  for (const row of chargeMeta) {
-    const rooms = roomMap[row.contract_id] || 0;
-    const minM = Number(row.min_m);
-    const maxM = Number(row.max_m);
-    const count = Number(row.c);
-    // Stubs from orphan/lease repair: only late months (often a single Sept row),
-    // with or without a room link.
-    if (minM >= 9 && count <= 4) {
-      stubContractIds.push(row.contract_id);
-    }
+  for (const c of liveContracts) {
+    const meta = byContract[c.id];
+    if (!meta) continue;
+    const rooms = roomMap[c.id] || 0;
+    const minM = Number(meta.min_m);
+    const count = Number(meta.c);
+    if (!(minM >= 9 && count <= 4)) continue;
+    const key = `${c.tenant_id}::${String(c.contract_number || '')
+      .trim()
+      .toLowerCase()}`;
+    const siblings = liveByKey.get(key) || [];
+    const hasOlderSibling = siblings.some((s) => {
+      if (s.id === c.id) return false;
+      const sm = byContract[s.id];
+      return sm && Number(sm.min_m) < 9;
+    });
+    // Empty-room late stubs, or late-only duplicate of an older live contract.
+    if (rooms === 0 || hasOlderSibling) stubContractIds.push(c.id);
   }
   if (stubContractIds.length) {
     const stubCharges = await db('rent_charges')
