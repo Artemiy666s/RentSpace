@@ -5,7 +5,8 @@ const { invalidateRentRegisterCache } = require('./managerDataService');
  * Fix 3rd floor (Советская 62) lease rooms:
  * - ИП Гущинский → 2, 3, 4, 3а
  * - ИП Седлер → 5, 5а
- * Drops wrong/cross links and duplicates.
+ * Anchors to the floor of the tenants' existing map rooms so we never pull
+ * same-numbered rooms from other floors/buildings.
  */
 function normalizeRoomNumber(value) {
   return String(value || '')
@@ -46,7 +47,7 @@ async function loadContractLinks(contractId) {
       'r.area as roomArea',
       'r.rentable_area as rentableArea',
       'r.status as roomStatus',
-      'f.id as floorId',
+      'r.floor_id as floorId',
       'f.name as floorName',
       'b.code as buildingCode',
       'b.name as buildingName'
@@ -54,21 +55,35 @@ async function loadContractLinks(contractId) {
     .orderBy('cr.id', 'asc');
 }
 
-async function findFloor62Rooms(propertyId, numbers) {
+/** Prefer floor that already hosts 5а / 3 / 4 map offices for these tenants. */
+async function resolveTargetFloorId(seedLinks) {
+  const counts = new Map();
+  for (const link of seedLinks) {
+    const num = normalizeRoomNumber(link.room_number);
+    const floorId = Number(link.floorId);
+    if (!floorId) continue;
+    // Strong signals for the Советская 62 / 3 этаж office block
+    const weight = ['3', '4', '5', '5a', '2', '3a'].includes(num) ? 3 : 1;
+    counts.set(floorId, (counts.get(floorId) || 0) + weight);
+  }
+  let best = null;
+  let bestScore = -1;
+  for (const [floorId, score] of counts) {
+    if (score > bestScore) {
+      best = floorId;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+async function findRoomsOnFloor(floorId, numbers) {
   const wanted = new Set(numbers.map(normalizeRoomNumber));
   const rows = await db('rooms as r')
-    .join('buildings as b', 'b.id', 'r.building_id')
-    .join('floors as f', 'f.id', 'r.floor_id')
-    .where('r.property_id', propertyId)
+    .leftJoin('buildings as b', 'b.id', 'r.building_id')
+    .leftJoin('floors as f', 'f.id', 'r.floor_id')
+    .where('r.floor_id', floorId)
     .whereNull('r.deleted_at')
-    .where(function () {
-      this.where('b.code', 'like', '%62%')
-        .orWhere('b.name', 'like', '%62%')
-        .orWhere('b.name', 'like', '%Советск%');
-    })
-    .where(function () {
-      this.where('f.level_number', 3).orWhere('f.name', 'like', '%3%');
-    })
     .select('r.*', 'b.name as buildingName', 'f.name as floorName', 'f.id as floorId');
 
   const byNum = new Map();
@@ -133,7 +148,15 @@ async function attachRoom({ contract, room, rate, actions, dryRun }) {
   });
 }
 
-async function syncContractRooms({ contract, keepSet, floorRooms, defaultRate, actions, dryRun, label }) {
+async function syncContractRooms({
+  contract,
+  keepSet,
+  floorRooms,
+  defaultRate,
+  actions,
+  dryRun,
+  label,
+}) {
   const links = await loadContractLinks(contract.id);
   actions.push({
     type: `${label}_current_links`,
@@ -144,23 +167,28 @@ async function syncContractRooms({ contract, keepSet, floorRooms, defaultRate, a
       roomNumber: l.room_number,
       linkArea: Number(l.linkArea),
       roomArea: Number(l.roomArea),
+      floorId: l.floorId,
     })),
   });
 
   const seenRoomIds = new Set();
+  const seenNumbers = new Set();
+
   for (const link of links) {
     const num = normalizeRoomNumber(link.room_number);
     const roomId = Number(link.room_id);
-    if (!keepSet.has(num) || seenRoomIds.has(roomId)) {
-      await detachLink(
-        { ...link, contractId: contract.id },
-        actions,
-        dryRun,
-        { reason: seenRoomIds.has(roomId) ? 'duplicate_link' : 'not_in_keep_set' }
-      );
+    const onTargetFloor = floorRooms.has(num) && Number(floorRooms.get(num).id) === roomId;
+
+    if (!keepSet.has(num) || seenRoomIds.has(roomId) || seenNumbers.has(num) || !onTargetFloor) {
+      let reason = 'not_in_keep_set';
+      if (seenRoomIds.has(roomId) || seenNumbers.has(num)) reason = 'duplicate_link';
+      else if (keepSet.has(num) && !onTargetFloor) reason = 'wrong_floor_room';
+      await detachLink({ ...link, contractId: contract.id }, actions, dryRun, { reason });
       continue;
     }
+
     seenRoomIds.add(roomId);
+    seenNumbers.add(num);
 
     const roomArea = Number(link.roomArea || link.rentableArea || 0);
     const linkArea = Number(link.linkArea || 0);
@@ -186,14 +214,13 @@ async function syncContractRooms({ contract, keepSet, floorRooms, defaultRate, a
   }
 
   for (const num of keepSet) {
+    if (seenNumbers.has(num)) continue;
     const room = floorRooms.get(num);
     if (!room) {
       actions.push({ type: 'room_not_found', tenant: label, roomNumber: num });
       continue;
     }
-    if (seenRoomIds.has(Number(room.id))) continue;
 
-    // Detach from any other live contract first
     const other = await db('contract_rooms as cr')
       .join('contracts as c', 'c.id', 'cr.contract_id')
       .join('rooms as r', 'r.id', 'cr.room_id')
@@ -215,6 +242,7 @@ async function syncContractRooms({ contract, keepSet, floorRooms, defaultRate, a
       dryRun,
     });
     seenRoomIds.add(Number(room.id));
+    seenNumbers.add(num);
   }
 
   const finalLinks = dryRun
@@ -247,9 +275,15 @@ async function repairGushchinskyLease({ propertyId = 1, dryRun = true } = {}) {
   if (!sedler.tenant) return { error: 'sedler_tenant_not_found', dryRun };
   if (!sedler.contract) return { error: 'sedler_live_contract_not_found', dryRun, tenantId: sedler.tenant.id };
 
-  const floorRooms = await findFloor62Rooms(pid, ['2', '3', '4', '3a', '5', '5a']);
+  const gushLinks = await loadContractLinks(gush.contract.id);
+  const sedlerLinks = await loadContractLinks(sedler.contract.id);
+  const floorId = await resolveTargetFloorId([...gushLinks, ...sedlerLinks]);
+  if (!floorId) return { error: 'target_floor_not_found', dryRun };
+
+  const floorRooms = await findRoomsOnFloor(floorId, ['2', '3', '4', '3a', '5', '5a']);
   actions.push({
-    type: 'floor_rooms_found',
+    type: 'target_floor',
+    floorId,
     rooms: [...floorRooms.entries()].map(([num, r]) => ({
       num,
       roomId: r.id,
@@ -259,7 +293,7 @@ async function repairGushchinskyLease({ propertyId = 1, dryRun = true } = {}) {
     })),
   });
 
-  // Sedler first: claim 5/5a (and drop wrong room 3) so Gushchinsky can reclaim 2/3/3a/4.
+  // Sedler first: claim 5/5a and drop wrong room 3.
   const sedlerResult = await syncContractRooms({
     contract: sedler.contract,
     keepSet: new Set(['5', '5a']),
