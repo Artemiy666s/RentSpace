@@ -614,7 +614,9 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     .where('c.property_id', propertyId)
     .whereNull('c.deleted_at')
     .whereNull('t.deleted_at')
-    .whereIn('c.status', ['active', 'expiring', 'terminated', 'completed'])
+    // Only live leases drive register debt / dashboard accruals.
+    // Terminated/completed rows without deleted_at used to inflate charts.
+    .whereIn('c.status', ['active', 'expiring'])
     .select(
       'c.id as contract_id',
       'c.tenant_id',

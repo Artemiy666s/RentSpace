@@ -431,6 +431,25 @@ router.get(
 );
 
 /**
+ * Cancel future / deleted-contract / duplicate rent charges; merge leftover dups.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-rent-charge-hygiene',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairRentChargeHygiene } = require('../services/rentChargeHygieneRepair');
+    const body = req.body || {};
+    const data = await repairRentChargeHygiene({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : new Date().getFullYear(),
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Paper-list cleanup: detach wrong rooms, close Borzenko from March, attach Vlasenko room 2, merge dups.
  * Dry-run by default; pass apply=true to write.
  */

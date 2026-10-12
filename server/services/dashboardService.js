@@ -217,9 +217,11 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
   const { debt, debtMonths, debtBreakdown, utilities, utilitiesPrevMonth } =
     await buildRentDebtAndUtilities(propertyId, year, registerRows);
 
+  // График «начислено/оплачено» — только месяцы, где аренда уже должна быть
+  // начислена (после 15-го), без будущих нояб/дек и т.п.
   const revenueByMonth = [];
   const paymentsByMonth = [];
-  for (let m = 1; m <= 12; m++) {
+  for (let m = 1; m <= rentPeriodMonth; m++) {
     let rent = 0;
     let rentPaid = 0;
     for (const row of registerRows) {
@@ -305,13 +307,14 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
     freeRooms,
     occupancyByFloor,
     chartYear: year,
+    revenueDueThrough: rentPeriodMonth,
   };
 }
 
 async function getManagerDashboard(propertyId, organizationId) {
   const pid = Number(propertyId);
   const oid = organizationId == null ? 0 : Number(organizationId);
-  const cacheKey = `dashboard:v1:${pid}:${oid}`;
+  const cacheKey = `dashboard:v2:${pid}:${oid}`;
 
   return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
     const today = dayjs().format('YYYY-MM-DD');

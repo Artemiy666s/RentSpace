@@ -24,11 +24,13 @@ export function buildMonthlyChartRows(
 export function buildChargesPaymentsRows(
   charges: MonthRow[] | undefined,
   payments: MonthRow[] | undefined,
-  t: (key: string) => string
+  t: (key: string) => string,
+  dueThrough = 12
 ) {
   const ch = Object.fromEntries((charges || []).map((r) => [r.period_month, Number(r.total) || 0]));
   const pa = Object.fromEntries((payments || []).map((r) => [r.period_month, Number(r.total) || 0]));
-  return Array.from({ length: 12 }, (_, i) => {
+  const maxM = Math.min(12, Math.max(0, Number(dueThrough) || 12));
+  return Array.from({ length: maxM }, (_, i) => {
     const m = i + 1;
     return {
       monthLabel: monthShortLabel(t, m),

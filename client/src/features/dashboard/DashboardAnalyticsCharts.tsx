@@ -31,6 +31,7 @@ type DashboardAnalytics = {
   revenueByMonth?: Array<{ period_month: number; total: number }>;
   paymentsByMonth?: Array<{ period_month: number; total: number }>;
   expensesByMonth?: Array<{ period_month: number; total: number }>;
+  revenueDueThrough?: number;
   occupancyByFloor?: Array<{
     name?: string;
     level_number?: number;
@@ -75,8 +76,14 @@ export function DashboardAnalyticsCharts({ data, chartOrder, onReorderCharts }: 
   const dnd = useSortableDnd();
 
   const chargesPaymentsData = useMemo(
-    () => buildChargesPaymentsRows(data?.revenueByMonth, data?.paymentsByMonth, t),
-    [data?.revenueByMonth, data?.paymentsByMonth, t]
+    () =>
+      buildChargesPaymentsRows(
+        data?.revenueByMonth,
+        data?.paymentsByMonth,
+        t,
+        data?.revenueDueThrough ?? 12
+      ),
+    [data?.revenueByMonth, data?.paymentsByMonth, data?.revenueDueThrough, t]
   );
 
   const expensesData = useMemo(
