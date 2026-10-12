@@ -448,6 +448,106 @@ router.post(
 );
 
 /**
+ * Debug why map labels miss tenant names for rooms on a floor.
+ * GET ?key=...&floorId=60008  or  &roomIds=390100,390101
+ */
+router.get(
+  '/map-lease-debug',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const dayjs = require('dayjs');
+    const asOf = dayjs().format('YYYY-MM-DD');
+    const floorId = req.query.floorId ? Number(req.query.floorId) : null;
+    const roomIds = String(req.query.roomIds || '')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter(Boolean);
+
+    let roomsQ = db('rooms as r')
+      .leftJoin('floors as f', 'f.id', 'r.floor_id')
+      .whereNull('r.deleted_at')
+      .select(
+        'r.id',
+        'r.room_number',
+        'r.area',
+        'r.status',
+        'r.floor_id',
+        'r.current_rate_without_vat',
+        'f.name as floorName'
+      )
+      .orderBy('r.room_number');
+    if (floorId) roomsQ = roomsQ.where('r.floor_id', floorId);
+    if (roomIds.length) roomsQ = roomsQ.whereIn('r.id', roomIds);
+    if (!floorId && !roomIds.length) {
+      res.status(400).json({ success: false, error: 'floorId or roomIds required' });
+      return;
+    }
+    const rooms = await roomsQ.limit(80);
+
+    const ids = rooms.map((r) => r.id);
+    const shapes = ids.length
+      ? await db('room_shapes as rs')
+          .join('floor_plans as fp', 'fp.id', 'rs.floor_plan_id')
+          .whereIn('rs.room_id', ids)
+          .where({ 'rs.is_active': true, 'fp.is_active': true })
+          .select('rs.id as shapeId', 'rs.room_id', 'rs.floor_plan_id', 'fp.floor_id as planFloorId')
+      : [];
+
+    const links = ids.length
+      ? await db('contract_rooms as cr')
+          .join('contracts as c', 'c.id', 'cr.contract_id')
+          .join('tenants as t', 't.id', 'c.tenant_id')
+          .whereIn('cr.room_id', ids)
+          .select(
+            'cr.id as linkId',
+            'cr.room_id',
+            'cr.area',
+            'cr.end_date',
+            'cr.start_date',
+            'c.id as contractId',
+            'c.status as contractStatus',
+            'c.deleted_at as contractDeletedAt',
+            't.id as tenantId',
+            't.name as tenantName',
+            't.deleted_at as tenantDeletedAt'
+          )
+          .orderBy(['cr.room_id', 'cr.id'])
+      : [];
+
+    const byRoom = rooms.map((r) => {
+      const roomLinks = links.filter((l) => Number(l.room_id) === Number(r.id));
+      const qualifying = roomLinks.filter(
+        (l) =>
+          ['active', 'expiring'].includes(l.contractStatus) &&
+          !l.contractDeletedAt &&
+          !l.tenantDeletedAt &&
+          (!l.end_date || String(l.end_date).slice(0, 10) >= asOf)
+      );
+      const shape = shapes.filter((s) => Number(s.room_id) === Number(r.id));
+      return {
+        roomId: r.id,
+        roomNumber: r.room_number,
+        area: Number(r.area),
+        status: r.status,
+        rate: r.current_rate_without_vat,
+        floorId: r.floor_id,
+        shapeCount: shape.length,
+        shapes: shape,
+        links: roomLinks,
+        mapWouldShowTenant: qualifying[0]?.tenantName || null,
+        qualifyCount: qualifying.length,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: { asOf, floorId, roomCount: rooms.length, rooms: byRoom },
+    });
+  })
+);
+
+/**
  * Cancel future / deleted-contract / duplicate rent charges; merge leftover dups.
  * Dry-run by default; pass apply=true to write.
  */
