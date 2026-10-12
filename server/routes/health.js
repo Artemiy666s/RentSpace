@@ -444,6 +444,7 @@ router.post(
       propertyId: body.propertyId ? Number(body.propertyId) : 1,
       year: body.year ? Number(body.year) : new Date().getFullYear(),
       dryRun: body.apply !== true && body.dryRun !== false,
+      mergeLimit: body.mergeLimit != null ? Number(body.mergeLimit) : 20,
     });
     res.json({ success: true, data });
   })
