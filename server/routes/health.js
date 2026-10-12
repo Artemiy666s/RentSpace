@@ -431,7 +431,7 @@ router.get(
 );
 
 /**
- * Fix ИП Гущинский rooms: keep 3/4/5, drop extras/duplicates, attach orphan room 5.
+ * Fix floor-62 leases: Гущинский → 2/3/4/3а, Седлер → 5/5а.
  */
 router.post(
   '/repair-gushchinsky-lease',
