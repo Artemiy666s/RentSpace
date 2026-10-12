@@ -448,6 +448,24 @@ router.post(
 );
 
 /**
+ * Apply manager-confirmed orphan room → tenant map (no duplicates).
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-manual-room-tenant-map',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairManualRoomTenantMap } = require('../services/manualRoomTenantMapRepair');
+    const body = req.body || {};
+    const data = await repairManualRoomTenantMap({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Debug why map labels miss tenant names for rooms on a floor.
  * GET ?key=...&floorId=60008  or  &roomIds=390100,390101
  */
