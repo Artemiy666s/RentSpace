@@ -324,4 +324,74 @@ router.post(
   })
 );
 
+/** Inspect one tenant's charges vs payments (find unlinked/mislinked money). */
+router.get(
+  '/tenant-ledger-audit',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const propertyId = Number(req.query.propertyId) || 1;
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const tenantLike = String(req.query.tenantLike || '').trim();
+    const contractId = req.query.contractId ? Number(req.query.contractId) : null;
+    if (!tenantLike && !contractId) {
+      res.status(400).json({ success: false, error: 'tenantLike or contractId required' });
+      return;
+    }
+
+    let tenantsQ = db('tenants as t')
+      .whereNull('t.deleted_at')
+      .select('t.id', 't.name')
+      .limit(20);
+    if (tenantLike) tenantsQ = tenantsQ.where('t.name', 'like', `%${tenantLike}%`);
+    if (contractId) {
+      tenantsQ = tenantsQ
+        .join('contracts as c', 'c.tenant_id', 't.id')
+        .where('c.id', contractId)
+        .groupBy('t.id', 't.name');
+    }
+    const tenants = await tenantsQ;
+    const out = [];
+    for (const t of tenants) {
+      const contracts = await db('contracts')
+        .where({ tenant_id: t.id, property_id: propertyId })
+        .select('id', 'contract_number', 'status', 'deleted_at');
+      const ids = contracts.map((c) => c.id);
+      const charges = ids.length
+        ? await db('rent_charges')
+            .whereIn('contract_id', ids)
+            .where({ period_year: year })
+            .whereNot('status', 'cancelled')
+            .select('contract_id', 'period_month', 'amount_with_vat', 'status')
+            .orderBy(['contract_id', 'period_month'])
+        : [];
+      const pays = await db('payments')
+        .where({ tenant_id: t.id, property_id: propertyId, period_year: year })
+        .select('id', 'contract_id', 'period_month', 'amount', 'payment_type', 'payment_date', 'purpose')
+        .orderBy(['period_month', 'id']);
+      const orphanPays = await db('payments')
+        .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+        .whereNull('tenant_id')
+        .where(function () {
+          this.whereNull('contract_id').orWhereIn('contract_id', ids.length ? ids : [0]);
+        })
+        .select('id', 'contract_id', 'period_month', 'amount', 'purpose')
+        .limit(50);
+      out.push({
+        tenantId: t.id,
+        tenantName: t.name,
+        contracts,
+        charges,
+        payments: pays,
+        chargeSum: charges.reduce((s, c) => s + Number(c.amount_with_vat || 0), 0),
+        paySum: pays
+          .filter((p) => p.payment_type === 'rent')
+          .reduce((s, p) => s + Number(p.amount || 0), 0),
+        orphanPays,
+      });
+    }
+    res.json({ success: true, data: { propertyId, year, tenants: out } });
+  })
+);
+
 module.exports = router;
