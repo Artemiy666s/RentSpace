@@ -1,3 +1,4 @@
+const dayjs = require('dayjs');
 const { db } = require('../db');
 const { invalidateRentRegisterCache } = require('./managerDataService');
 
@@ -207,10 +208,11 @@ async function syncContractRooms({
       }
     }
 
-    // Map hides tenant when contract_rooms.end_date is in the past.
-    if (link.end_date) {
+    // Map hides tenant when contract_rooms.end_date is before today.
+    const end = link.end_date ? dayjs(link.end_date) : null;
+    if (end && end.isValid() && end.isBefore(dayjs(), 'day')) {
       actions.push({
-        type: 'clear_link_end_date',
+        type: 'clear_past_link_end_date',
         linkId: link.linkId,
         roomNumber: link.room_number,
         from: link.end_date,

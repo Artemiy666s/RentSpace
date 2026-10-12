@@ -451,6 +451,25 @@ router.post(
  * Debug why map labels miss tenant names for rooms on a floor.
  * GET ?key=...&floorId=60008  or  &roomIds=390100,390101
  */
+/** One-off: restore / set contract_rooms.end_date by link id. */
+router.post(
+  '/set-contract-room-end-date',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const body = req.body || {};
+    const linkId = Number(body.linkId);
+    if (!linkId) {
+      res.status(400).json({ success: false, error: 'linkId required' });
+      return;
+    }
+    const endDate = body.endDate === null || body.endDate === '' ? null : String(body.endDate).slice(0, 10);
+    await db('contract_rooms').where({ id: linkId }).update({ end_date: endDate });
+    const row = await db('contract_rooms').where({ id: linkId }).first();
+    res.json({ success: true, data: { linkId, end_date: row?.end_date || null } });
+  })
+);
+
 router.get(
   '/map-lease-debug',
   asyncHandler(async (req, res) => {
@@ -522,7 +541,7 @@ router.get(
           ['active', 'expiring'].includes(l.contractStatus) &&
           !l.contractDeletedAt &&
           !l.tenantDeletedAt &&
-          (!l.end_date || String(l.end_date).slice(0, 10) >= asOf)
+          (!l.end_date || dayjs(l.end_date).format('YYYY-MM-DD') >= asOf)
       );
       const shape = shapes.filter((s) => Number(s.room_id) === Number(r.id));
       return {
