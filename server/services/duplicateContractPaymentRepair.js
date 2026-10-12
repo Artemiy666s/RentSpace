@@ -26,6 +26,7 @@ async function repairDuplicateContractPayments({
   year = new Date().getFullYear(),
   dryRun = true,
   contractNumbers = null,
+  limit = null,
 } = {}) {
   const pid = Number(propertyId);
   if (!pid) {
@@ -64,12 +65,15 @@ async function repairDuplicateContractPayments({
   }
 
   const multi = [...groups.entries()].filter(([, rows]) => rows.length > 1);
+  const groupsTotal = multi.length;
+  const maxGroups = limit != null && Number(limit) > 0 ? Number(limit) : null;
   const planned = [];
   let paymentsMoved = 0;
   let chargesMoved = 0;
   let utilChargesMoved = 0;
 
   for (const [, rows] of multi) {
+    if (maxGroups && planned.length >= maxGroups) break;
     const ids = rows.map((r) => r.id);
     const [chargeCounts, payCounts, utilCounts] = await Promise.all([
       db('rent_charges')
@@ -326,6 +330,7 @@ async function repairDuplicateContractPayments({
     propertyId: pid,
     year: y,
     dryRun,
+    groupsTotal,
     groupsScanned: multi.length,
     groupsChanged: planned.length,
     paymentsMoved,

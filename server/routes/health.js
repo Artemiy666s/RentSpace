@@ -318,6 +318,7 @@ router.post(
       year: body.year ? Number(body.year) : new Date().getFullYear(),
       dryRun: body.apply !== true && body.dryRun !== false,
       contractNumbers: Array.isArray(body.contractNumbers) ? body.contractNumbers : null,
+      limit: body.limit != null ? Number(body.limit) : null,
     });
     res.json({ success: true, data });
   })
