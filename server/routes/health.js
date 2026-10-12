@@ -355,14 +355,7 @@ router.get(
     for (const t of tenants) {
       const contracts = await db('contracts')
         .where({ tenant_id: t.id, property_id: propertyId })
-        .select(
-          'id',
-          'contract_number',
-          'status',
-          'deleted_at',
-          'rate_without_vat',
-          'area'
-        );
+        .select('id', 'contract_number', 'status', 'deleted_at', 'rate_without_vat');
       const ids = contracts.map((c) => c.id);
       const rooms = ids.length
         ? await db('contract_rooms as cr')
