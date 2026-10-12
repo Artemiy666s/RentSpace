@@ -431,6 +431,25 @@ router.get(
 );
 
 /**
+ * Paper-list cleanup: detach wrong rooms, close Borzenko from March, attach Vlasenko room 2, merge dups.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-paper-lease-cleanup',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairPaperLeaseCleanup } = require('../services/paperLeaseCleanupRepair');
+    const body = req.body || {};
+    const data = await repairPaperLeaseCleanup({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : 2026,
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Broad payment hunt: by tenant name / amount / year — including wrong tenant_id links.
  */
 router.get(
