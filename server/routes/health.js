@@ -3,6 +3,7 @@ const config = require('../config');
 const { checkConnection } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { repairOrphanOccupiedRooms } = require('../services/orphanLeaseRepairService');
+const { ensureKnownLeaseCorrections } = require('../services/knownLeaseCorrections');
 
 const router = express.Router();
 
@@ -42,6 +43,16 @@ router.post(
       dryRun: body.dryRun !== false && body.apply !== true,
     });
     res.json({ success: true, data: result });
+  })
+);
+
+/** Apply explicit known lease corrections (11а → Медведская, etc.). */
+router.post(
+  '/repair-known-leases',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const data = await ensureKnownLeaseCorrections();
+    res.json({ success: true, data });
   })
 );
 

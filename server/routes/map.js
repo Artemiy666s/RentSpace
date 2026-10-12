@@ -495,6 +495,11 @@ async function buildPlanPayload(plan, floorId) {
     return { plan: null, shapes: [], rooms: [], floorRooms: [] };
   }
 
+  // One-shot known corrections (e.g. 11а → Медведская). Idempotent; no area guessing.
+  await require('../services/knownLeaseCorrections')
+    .ensureKnownLeaseCorrections()
+    .catch(() => {});
+
   const [shapes, floorRooms] = await Promise.all([
     db('room_shapes as rs')
       .join('rooms as r', 'r.id', 'rs.room_id')
