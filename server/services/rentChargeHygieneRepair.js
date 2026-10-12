@@ -126,6 +126,72 @@ async function repairRentChargeHygiene({
   actions.push({ type: 'cancel_identical_duplicate_charges', count: dupIds.length });
   const dupN = await cancelByIds(dupIds, dryRun, 'rent_charge_hygiene_identical_dup');
 
+  // 5b) Stub contracts: live, no rooms, only late-year charges (typical orphan-repair junk)
+  const liveContracts = await db('contracts')
+    .where({ property_id: pid })
+    .whereNull('deleted_at')
+    .whereIn('status', ['active', 'expiring'])
+    .select('id', 'tenant_id', 'contract_number');
+  const roomCounts = await db('contract_rooms')
+    .whereIn(
+      'contract_id',
+      liveContracts.map((c) => c.id)
+    )
+    .groupBy('contract_id')
+    .count('* as c')
+    .select('contract_id');
+  const roomMap = Object.fromEntries(roomCounts.map((r) => [r.contract_id, Number(r.c)]));
+  const chargeMeta = await db('rent_charges')
+    .where({ property_id: pid, period_year: y })
+    .whereNot('status', 'cancelled')
+    .whereIn(
+      'contract_id',
+      liveContracts.map((c) => c.id)
+    )
+    .groupBy('contract_id')
+    .select('contract_id')
+    .count('* as c')
+    .min('period_month as min_m')
+    .max('period_month as max_m')
+    .sum('amount_with_vat as s');
+  const stubChargeIds = [];
+  const stubContractIds = [];
+  for (const row of chargeMeta) {
+    const rooms = roomMap[row.contract_id] || 0;
+    const minM = Number(row.min_m);
+    const maxM = Number(row.max_m);
+    const count = Number(row.c);
+    // Stubs from orphan/lease repair: only late months (often a single Sept row),
+    // with or without a room link.
+    if (minM >= 9 && count <= 4) {
+      stubContractIds.push(row.contract_id);
+    }
+  }
+  if (stubContractIds.length) {
+    const stubCharges = await db('rent_charges')
+      .where({ property_id: pid, period_year: y })
+      .whereIn('contract_id', stubContractIds)
+      .whereNot('status', 'cancelled')
+      .select('id', 'amount_with_vat');
+    stubChargeIds.push(...stubCharges.map((r) => r.id));
+    actions.push({
+      type: 'cancel_empty_stub_late_charges',
+      contractCount: stubContractIds.length,
+      count: stubChargeIds.length,
+      sum: roundMoney(stubCharges.reduce((s, r) => s + Number(r.amount_with_vat || 0), 0)),
+      contractIds: stubContractIds.slice(0, 40),
+    });
+    if (!dryRun) {
+      await cancelByIds(stubChargeIds, false, 'rent_charge_hygiene_empty_stub');
+      await db('contracts').whereIn('id', stubContractIds).update({
+        status: 'terminated',
+        deleted_at: db.fn.now(),
+        updated_at: db.fn.now(),
+      });
+    }
+  } else {
+    actions.push({ type: 'cancel_empty_stub_late_charges', contractCount: 0, count: 0 });
+  }
   // 6) Optional limited merge of leftover live duplicate contract numbers
   let postMergeCancelled = 0;
   if (Number(mergeLimit) > 0) {
@@ -182,7 +248,8 @@ async function repairRentChargeHygiene({
     year: y,
     dryRun,
     dueThrough,
-    cancelledCount: futureN + deletedN + termN + zeroN + dupN + postMergeCancelled,
+    cancelledCount:
+      futureN + deletedN + termN + zeroN + dupN + stubChargeIds.length + postMergeCancelled,
     actions,
     postMergeCancelled,
     monthTotalsAfter: monthTotalsAfter.map((r) => ({
