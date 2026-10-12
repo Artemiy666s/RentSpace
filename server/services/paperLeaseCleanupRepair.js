@@ -564,6 +564,34 @@ async function repairPaperLeaseCleanup({ propertyId = 1, year = 2026, dryRun = t
     }
   }
 
+  // Soft-delete any remaining live contracts for cleaned tenants that have zero rooms.
+  {
+    const tenantIds = report.tenants.map((t) => t.tenantId).filter(Boolean);
+    for (const tenantId of tenantIds) {
+      const actions = [];
+      const live = await db('contracts')
+        .where({ tenant_id: tenantId, property_id: pid })
+        .whereNull('deleted_at')
+        .whereIn('status', ['active', 'expiring'])
+        .select('id');
+      for (const c of live) {
+        const roomCount = await db('contract_rooms').where({ contract_id: c.id }).count('* as c').first();
+        if (Number(roomCount?.c || 0) === 0) {
+          // Don't delete Vlasenko canonical while waiting for room 2 — keep contract shell.
+          const tenantRow = report.tenants.find((t) => t.tenantId === tenantId);
+          if (tenantRow?.key === 'vlasenko') {
+            actions.push({ type: 'note_vlasenko_live_without_rooms', contractId: c.id });
+            continue;
+          }
+          if (tenantRow?.key === 'borzenko') continue;
+          await softDeleteContract(c.id, dryRun, actions, 'empty_live_contract_after_paper_cleanup');
+        }
+      }
+      const row = report.tenants.find((t) => t.tenantId === tenantId);
+      if (row && actions.length) row.actions.push(...actions);
+    }
+  }
+
   if (!dryRun) {
     invalidateRentRegisterCache(pid);
   }
