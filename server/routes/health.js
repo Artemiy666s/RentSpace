@@ -134,4 +134,130 @@ router.post(
   })
 );
 
+/**
+ * Temporary read-only audit: which contracts form each rent-debt chip.
+ * Auth: ?key= or x-repair-key matching REPAIR_KEY, or one-shot TEMP_DEBT_AUDIT_KEY.
+ */
+router.get(
+  '/debt-chip-audit',
+  asyncHandler(async (req, res) => {
+    const provided = req.get('x-repair-key') || req.query.key;
+    const allowed =
+      (process.env.REPAIR_KEY && provided === process.env.REPAIR_KEY) ||
+      provided === (process.env.TEMP_DEBT_AUDIT_KEY || 'rs-debt-audit-20261012');
+    if (!allowed) {
+      res.status(401).json({ success: false, error: 'unauthorized' });
+      return;
+    }
+
+    const { listRentRegister } = require('../services/managerDataService');
+    const { maxDueRentMonth } = require('../utils/billingPeriod');
+    const { db } = require('../db');
+
+    const propertyId = Number(req.query.propertyId) || 2;
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const dueThrough = maxDueRentMonth(year);
+    const focusMonths = String(req.query.months || '2,3,4,5')
+      .split(',')
+      .map((x) => Number(x))
+      .filter((m) => m >= 1 && m <= 12);
+
+    const rows = await listRentRegister(propertyId, year, null, { ensureCharges: false });
+    const debtors = rows.filter((r) => Number(r.debt || 0) > 0.005);
+
+    const roundMoney = (v) => Math.round(Number(v || 0) * 100) / 100;
+    const monthTotals = {};
+    const contributors = {};
+
+    for (const row of debtors) {
+      let remaining = roundMoney(row.debt);
+      const yearPaid = Object.values(row.months || {}).reduce(
+        (s, x) => s + Number(x.paid || 0),
+        0
+      );
+      for (let m = dueThrough; m >= 1 && remaining > 0.005; m -= 1) {
+        const charged = Number(row.months?.[m]?.rent || 0);
+        if (charged <= 0) continue;
+        const slice = Math.min(charged, remaining);
+        const debt = roundMoney(slice);
+        if (debt <= 0.005) continue;
+        monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
+        if (!contributors[m]) contributors[m] = [];
+        contributors[m].push({
+          contractId: row.contractId,
+          tenantName: row.tenantName,
+          contractLabel: row.contractLabel,
+          slice: debt,
+          monthCharge: charged,
+          contractDebt: roundMoney(row.debt),
+          yearPaid: roundMoney(yearPaid),
+        });
+        remaining = roundMoney(remaining - debt);
+      }
+    }
+
+    const focus = {};
+    for (const m of focusMonths) {
+      focus[m] = {
+        total: monthTotals[m] || 0,
+        contributors: (contributors[m] || []).sort((a, b) => b.slice - a.slice),
+      };
+    }
+
+    const [paySum, chargeSum] = await Promise.all([
+      db('payments')
+        .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+        .sum('amount as s')
+        .count('* as c')
+        .first(),
+      db('rent_charges')
+        .where({ property_id: propertyId, period_year: year })
+        .whereNot('status', 'cancelled')
+        .where('period_month', '<=', dueThrough)
+        .sum('amount_with_vat as s')
+        .count('* as c')
+        .first(),
+    ]);
+
+    const near4891 = await db('rent_charges as rc')
+      .join('tenants as t', 't.id', 'rc.tenant_id')
+      .where({ 'rc.property_id': propertyId, 'rc.period_year': year })
+      .whereNot('rc.status', 'cancelled')
+      .whereRaw('ABS(rc.amount_with_vat - 4891) < 1')
+      .groupBy('rc.contract_id', 't.name')
+      .select('rc.contract_id as contractId', 't.name as tenantName')
+      .sum('rc.amount_with_vat as sampleAmount')
+      .count('* as months');
+
+    res.json({
+      success: true,
+      data: {
+        propertyId,
+        year,
+        dueThrough,
+        totalDebt: roundMoney(debtors.reduce((s, r) => s + Number(r.debt), 0)),
+        debtChips: Object.entries(monthTotals)
+          .map(([month, amount]) => ({ month: Number(month), amount }))
+          .sort((a, b) => b.month - a.month),
+        focus,
+        yearRentPayments: paySum,
+        dueRentCharges: chargeSum,
+        chargesNear4891: near4891,
+        topDebtors: debtors
+          .slice()
+          .sort((a, b) => Number(b.debt) - Number(a.debt))
+          .slice(0, 15)
+          .map((r) => ({
+            contractId: r.contractId,
+            tenantName: r.tenantName,
+            debt: roundMoney(r.debt),
+            yearPaid: roundMoney(
+              Object.values(r.months || {}).reduce((s, x) => s + Number(x.paid || 0), 0)
+            ),
+          })),
+      },
+    });
+  })
+);
+
 module.exports = router;
