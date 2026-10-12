@@ -574,9 +574,13 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v2:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v3:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
     cacheDelPrefix('dashboard:v1:');
+    cacheDelPrefix('dashboard:v2:');
+    cacheDelPrefix('dashboard:v3:');
   }
 }
 
