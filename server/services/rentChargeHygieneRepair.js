@@ -209,6 +209,42 @@ async function repairRentChargeHygiene({
   } else {
     actions.push({ type: 'cancel_empty_stub_late_charges', contractCount: 0, count: 0 });
   }
+
+  // 5c) Same contract: more charge rows in Sept than in earlier months → drop extras
+  const septExtraIds = [];
+  const byContractCharges = new Map();
+  for (const row of dups) {
+    if (!byContractCharges.has(row.contract_id)) byContractCharges.set(row.contract_id, []);
+    byContractCharges.get(row.contract_id).push(row);
+  }
+  for (const [, rows] of byContractCharges) {
+    const earlyCounts = {};
+    for (let m = 1; m <= 8; m++) earlyCounts[m] = 0;
+    const septRows = [];
+    for (const r of rows) {
+      const m = Number(r.period_month);
+      if (m >= 1 && m <= 8) earlyCounts[m] += 1;
+      if (m === 9) septRows.push(r);
+    }
+    const earlyMax = Math.max(0, ...Object.values(earlyCounts));
+    if (earlyMax >= 1 && septRows.length > earlyMax) {
+      septRows.sort((a, b) => Number(b.amount_with_vat) - Number(a.amount_with_vat));
+      const drop = septRows.slice(earlyMax);
+      septExtraIds.push(...drop.map((r) => r.id));
+    }
+  }
+  actions.push({
+    type: 'cancel_extra_september_rows',
+    count: septExtraIds.length,
+    sum: roundMoney(
+      septExtraIds.reduce((s, id) => {
+        const row = dups.find((r) => r.id === id);
+        return s + Number(row?.amount_with_vat || 0);
+      }, 0)
+    ),
+  });
+  const septExtraN = await cancelByIds(septExtraIds, dryRun, 'rent_charge_hygiene_extra_sept');
+
   // 6) Optional limited merge of leftover live duplicate contract numbers
   let postMergeCancelled = 0;
   if (Number(mergeLimit) > 0) {
@@ -266,7 +302,14 @@ async function repairRentChargeHygiene({
     dryRun,
     dueThrough,
     cancelledCount:
-      futureN + deletedN + termN + zeroN + dupN + stubChargeIds.length + postMergeCancelled,
+      futureN +
+      deletedN +
+      termN +
+      zeroN +
+      dupN +
+      stubChargeIds.length +
+      septExtraN +
+      postMergeCancelled,
     actions,
     postMergeCancelled,
     monthTotalsAfter: monthTotalsAfter.map((r) => ({
