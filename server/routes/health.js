@@ -431,6 +431,176 @@ router.get(
 );
 
 /**
+ * Broad payment hunt: by tenant name / amount / year — including wrong tenant_id links.
+ */
+router.get(
+  '/payment-hunt',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const propertyId = Number(req.query.propertyId) || 1;
+    const year = req.query.year != null ? Number(req.query.year) : null;
+    const tenantLike = String(req.query.tenantLike || '').trim();
+    const amount = req.query.amount != null ? Number(req.query.amount) : null;
+    const amountEps = Number(req.query.amountEps) || 0.05;
+
+    const tenants = tenantLike
+      ? await db('tenants').whereNull('deleted_at').where('name', 'like', `%${tenantLike}%`).select('id', 'name').limit(20)
+      : [];
+    const tenantIds = tenants.map((t) => t.id);
+
+    const byTenant = tenantIds.length
+      ? await db('payments as p')
+          .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+          .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+          .where('p.property_id', propertyId)
+          .whereIn('p.tenant_id', tenantIds)
+          .modify((qb) => {
+            if (year) qb.where('p.period_year', year);
+          })
+          .select(
+            'p.id',
+            'p.tenant_id',
+            'p.contract_id',
+            'p.period_year',
+            'p.period_month',
+            'p.amount',
+            'p.payment_type',
+            'p.payment_date',
+            'p.purpose',
+            'p.property_id',
+            't.name as tenant_name',
+            'c.contract_number',
+            'c.deleted_at as contract_deleted_at',
+            'c.status as contract_status'
+          )
+          .orderBy(['p.period_year', 'p.period_month', 'p.id'])
+          .limit(300)
+      : [];
+
+    const byPurpose = tenantLike
+      ? await db('payments as p')
+          .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+          .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+          .where('p.property_id', propertyId)
+          .where('p.purpose', 'like', `%${tenantLike}%`)
+          .modify((qb) => {
+            if (year) qb.where('p.period_year', year);
+          })
+          .select(
+            'p.id',
+            'p.tenant_id',
+            'p.contract_id',
+            'p.period_year',
+            'p.period_month',
+            'p.amount',
+            'p.payment_type',
+            'p.purpose',
+            't.name as tenant_name',
+            'c.contract_number'
+          )
+          .limit(100)
+      : [];
+
+    const byAmount = amount != null && Number.isFinite(amount)
+      ? await db('payments as p')
+          .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+          .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+          .where('p.property_id', propertyId)
+          .whereRaw('ABS(p.amount - ?) <= ?', [amount, amountEps])
+          .modify((qb) => {
+            if (year) qb.where('p.period_year', year);
+          })
+          .select(
+            'p.id',
+            'p.tenant_id',
+            'p.contract_id',
+            'p.period_year',
+            'p.period_month',
+            'p.amount',
+            'p.payment_type',
+            'p.purpose',
+            't.name as tenant_name',
+            'c.contract_number',
+            'c.deleted_at as contract_deleted_at'
+          )
+          .orderBy(['p.period_year', 'p.period_month', 'p.id'])
+          .limit(200)
+      : [];
+
+    // Payments on contracts that share number with this tenant but wrong tenant_id
+    let onSiblingContracts = [];
+    if (tenantIds.length) {
+      const nums = await db('contracts')
+        .where({ property_id: propertyId })
+        .whereIn('tenant_id', tenantIds)
+        .whereNotNull('contract_number')
+        .distinct('contract_number')
+        .pluck('contract_number');
+      if (nums.length) {
+        const siblingIds = await db('contracts')
+          .where({ property_id: propertyId })
+          .whereIn('contract_number', nums)
+          .pluck('id');
+        if (siblingIds.length) {
+          onSiblingContracts = await db('payments as p')
+            .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+            .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+            .where('p.property_id', propertyId)
+            .whereIn('p.contract_id', siblingIds)
+            .modify((qb) => {
+              if (year) qb.where('p.period_year', year);
+            })
+            .select(
+              'p.id',
+              'p.tenant_id',
+              'p.contract_id',
+              'p.period_year',
+              'p.period_month',
+              'p.amount',
+              'p.payment_type',
+              'p.purpose',
+              't.name as tenant_name',
+              'c.contract_number',
+              'c.tenant_id as contract_tenant_id'
+            )
+            .orderBy(['p.period_year', 'p.period_month', 'p.id'])
+            .limit(300);
+        }
+      }
+    }
+
+    // Any-year totals for this tenant name
+    const anyYear = tenantIds.length
+      ? await db('payments')
+          .where({ property_id: propertyId })
+          .whereIn('tenant_id', tenantIds)
+          .groupBy('period_year', 'payment_type')
+          .select('period_year', 'payment_type')
+          .sum('amount as s')
+          .count('* as c')
+          .orderBy('period_year', 'desc')
+      : [];
+
+    res.json({
+      success: true,
+      data: {
+        propertyId,
+        year,
+        tenantLike,
+        amount,
+        tenants,
+        byTenant,
+        byPurpose,
+        byAmount,
+        onSiblingContracts,
+        anyYear,
+      },
+    });
+  })
+);
+
+/**
  * Property-wide utilities audit: charges/payments by month, live vs orphan contracts.
  */
 router.get(
