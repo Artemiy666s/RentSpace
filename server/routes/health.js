@@ -365,6 +365,13 @@ router.get(
             .select('contract_id', 'period_month', 'amount_with_vat', 'status')
             .orderBy(['contract_id', 'period_month'])
         : [];
+      const utilCharges = ids.length
+        ? await db('utility_charges')
+            .whereIn('contract_id', ids)
+            .where({ period_year: year })
+            .select('contract_id', 'period_month', 'amount', 'utility_type')
+            .orderBy(['contract_id', 'period_month'])
+        : [];
       const pays = await db('payments')
         .where({ tenant_id: t.id, property_id: propertyId, period_year: year })
         .select('id', 'contract_id', 'period_month', 'amount', 'payment_type', 'payment_date', 'purpose')
@@ -382,15 +389,171 @@ router.get(
         tenantName: t.name,
         contracts,
         charges,
+        utilCharges,
         payments: pays,
         chargeSum: charges.reduce((s, c) => s + Number(c.amount_with_vat || 0), 0),
+        utilChargeSum: utilCharges.reduce((s, c) => s + Number(c.amount || 0), 0),
         paySum: pays
           .filter((p) => p.payment_type === 'rent')
+          .reduce((s, p) => s + Number(p.amount || 0), 0),
+        utilPaySum: pays
+          .filter((p) => p.payment_type === 'utilities')
           .reduce((s, p) => s + Number(p.amount || 0), 0),
         orphanPays,
       });
     }
     res.json({ success: true, data: { propertyId, year, tenants: out } });
+  })
+);
+
+/**
+ * Property-wide utilities audit: charges/payments by month, live vs orphan contracts.
+ */
+router.get(
+  '/utility-month-audit',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { db } = require('../db');
+    const { maxDueUtilityMonth } = require('../utils/billingPeriod');
+
+    const propertyId = Number(req.query.propertyId) || 1;
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const focusMonth = req.query.month ? Number(req.query.month) : null;
+    const roundMoney = (v) => Math.round(Number(v || 0) * 100) / 100;
+    const utilDueThrough = maxDueUtilityMonth(year);
+
+    const [chargeMonths, payMonths, purposeLikeUtil] = await Promise.all([
+      db('utility_charges')
+        .where({ property_id: propertyId, period_year: year })
+        .modify((qb) => {
+          if (focusMonth) qb.where('period_month', focusMonth);
+        })
+        .groupBy('period_month')
+        .select('period_month')
+        .sum('amount as s')
+        .count('* as c')
+        .orderBy('period_month'),
+      db('payments')
+        .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
+        .modify((qb) => {
+          if (focusMonth) qb.where('period_month', focusMonth);
+        })
+        .groupBy('period_month')
+        .select('period_month')
+        .sum('amount as s')
+        .count('* as c')
+        .orderBy('period_month'),
+      db('payments')
+        .where({ property_id: propertyId, period_year: year })
+        .whereNot('payment_type', 'utilities')
+        .where(function () {
+          this.where('purpose', 'like', '%коммун%')
+            .orWhere('purpose', 'like', '%возмещ%')
+            .orWhere('purpose', 'like', '%utilities%');
+        })
+        .select('id', 'contract_id', 'tenant_id', 'period_month', 'amount', 'payment_type', 'purpose')
+        .limit(100),
+    ]);
+
+    const liveContractIds = (
+      await db('contracts')
+        .where({ property_id: propertyId })
+        .whereNull('deleted_at')
+        .whereIn('status', ['active', 'expiring'])
+        .select('id')
+    ).map((r) => r.id);
+
+    const liveIdSet = new Set(liveContractIds);
+    const month = focusMonth || utilDueThrough || 8;
+
+    const chargesFocus = await db('utility_charges as u')
+      .leftJoin('contracts as c', 'c.id', 'u.contract_id')
+      .leftJoin('tenants as t', 't.id', 'u.tenant_id')
+      .where({ 'u.property_id': propertyId, 'u.period_year': year, 'u.period_month': month })
+      .select(
+        'u.id',
+        'u.contract_id',
+        'u.tenant_id',
+        'u.amount',
+        'u.utility_type',
+        'c.contract_number',
+        'c.status as contract_status',
+        'c.deleted_at',
+        't.name as tenant_name'
+      )
+      .orderBy('u.amount', 'desc')
+      .limit(200);
+
+    const paysFocus = await db('payments as p')
+      .leftJoin('contracts as c', 'c.id', 'p.contract_id')
+      .leftJoin('tenants as t', 't.id', 'p.tenant_id')
+      .where({
+        'p.property_id': propertyId,
+        'p.period_year': year,
+        'p.period_month': month,
+        'p.payment_type': 'utilities',
+      })
+      .select(
+        'p.id',
+        'p.contract_id',
+        'p.tenant_id',
+        'p.amount',
+        'p.purpose',
+        'c.contract_number',
+        'c.status as contract_status',
+        'c.deleted_at',
+        't.name as tenant_name'
+      )
+      .orderBy('p.amount', 'desc')
+      .limit(200);
+
+    const splitLive = (rows) => {
+      const live = [];
+      const orphan = [];
+      for (const row of rows) {
+        const onLive = row.contract_id && liveIdSet.has(row.contract_id) && !row.deleted_at;
+        (onLive ? live : orphan).push(row);
+      }
+      return {
+        liveCount: live.length,
+        liveSum: roundMoney(live.reduce((s, r) => s + Number(r.amount || 0), 0)),
+        orphanCount: orphan.length,
+        orphanSum: roundMoney(orphan.reduce((s, r) => s + Number(r.amount || 0), 0)),
+        orphanSample: orphan.slice(0, 30),
+        liveSample: live.slice(0, 20),
+      };
+    };
+
+    const totals = {
+      chargeRows: chargeMonths.reduce((s, r) => s + Number(r.c || 0), 0),
+      chargeSum: roundMoney(chargeMonths.reduce((s, r) => s + Number(r.s || 0), 0)),
+      payRows: payMonths.reduce((s, r) => s + Number(r.c || 0), 0),
+      paySum: roundMoney(payMonths.reduce((s, r) => s + Number(r.s || 0), 0)),
+    };
+
+    res.json({
+      success: true,
+      data: {
+        propertyId,
+        year,
+        utilDueThrough,
+        focusMonth: month,
+        totals,
+        chargeMonths: chargeMonths.map((r) => ({
+          month: Number(r.period_month),
+          count: Number(r.c),
+          sum: roundMoney(r.s),
+        })),
+        payMonths: payMonths.map((r) => ({
+          month: Number(r.period_month),
+          count: Number(r.c),
+          sum: roundMoney(r.s),
+        })),
+        purposeLikeUtilitiesButWrongType: purposeLikeUtil,
+        chargesFocus: splitLive(chargesFocus),
+        paysFocus: splitLive(paysFocus),
+      },
+    });
   })
 );
 
