@@ -43,6 +43,7 @@ async function loadContractLinks(contractId) {
       'cr.room_id',
       'cr.area as linkArea',
       'cr.rate_without_vat as linkRate',
+      'cr.end_date',
       'r.room_number',
       'r.area as roomArea',
       'r.rentable_area as rentableArea',
@@ -140,6 +141,7 @@ async function attachRoom({ contract, room, rate, actions, dryRun }) {
     area,
     rate_without_vat: useRate,
     start_date: contract.start_date || contract.contract_date || null,
+    end_date: null,
   });
   await db('rooms').where({ id: room.id }).update({
     status: 'occupied',
@@ -204,6 +206,20 @@ async function syncContractRooms({
         await db('contract_rooms').where({ id: link.linkId }).update({ area: roomArea });
       }
     }
+
+    // Map hides tenant when contract_rooms.end_date is in the past.
+    if (link.end_date) {
+      actions.push({
+        type: 'clear_link_end_date',
+        linkId: link.linkId,
+        roomNumber: link.room_number,
+        from: link.end_date,
+      });
+      if (!dryRun) {
+        await db('contract_rooms').where({ id: link.linkId }).update({ end_date: null });
+      }
+    }
+
     if (!dryRun) {
       await db('rooms').where({ id: roomId }).update({
         status: 'occupied',
