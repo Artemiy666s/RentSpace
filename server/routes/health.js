@@ -431,6 +431,23 @@ router.get(
 );
 
 /**
+ * Fix ИП Гущинский rooms: keep 3/4/5, drop extras/duplicates, attach orphan room 5.
+ */
+router.post(
+  '/repair-gushchinsky-lease',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairGushchinskyLease } = require('../services/gushchinskyLeaseRepair');
+    const body = req.body || {};
+    const data = await repairGushchinskyLease({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Cancel future / deleted-contract / duplicate rent charges; merge leftover dups.
  * Dry-run by default; pass apply=true to write.
  */
