@@ -359,9 +359,8 @@ async function repairDuplicateContractPayments({
       const moneyLeft = payLeft > 0 || rentLeft > 0 || utilLeft > 0;
 
       if (!moneyLeft && dup.live) {
-        // Do not auto-merge unique rooms onto canonical: that silently changes
-        // area/rate and can regenerate accruals. Soft-delete alone hides the
-        // stub from the register; only detach rooms already on canonical.
+        // Several rooms on one contract is normal. Unique rooms from the stub
+        // must move onto canonical; overlapping room links are detached.
         const dupRooms = await db('contract_rooms')
           .where({ contract_id: dup.id })
           .select('id', 'room_id', 'area', 'rate_without_vat');
@@ -371,8 +370,26 @@ async function repairDuplicateContractPayments({
               await db('contract_rooms').where({ contract_id: canonical.id }).select('room_id')
             ).map((r) => Number(r.room_id))
           );
+          const toMove = dupRooms.filter((r) => !canonicalRoomIds.has(Number(r.room_id)));
           const toDetach = dupRooms.filter((r) => canonicalRoomIds.has(Number(r.room_id)));
-          const leftOnStub = dupRooms.filter((r) => !canonicalRoomIds.has(Number(r.room_id)));
+          if (toMove.length) {
+            groupPlan.actions.push({
+              type: 'move_contract_rooms',
+              fromContractId: dup.id,
+              toContractId: canonical.id,
+              count: toMove.length,
+              roomIds: toMove.map((r) => r.room_id),
+              areaSum: roundMoney(toMove.reduce((s, r) => s + Number(r.area || 0), 0)),
+            });
+            if (!dryRun) {
+              await db('contract_rooms')
+                .whereIn(
+                  'id',
+                  toMove.map((r) => r.id)
+                )
+                .update({ contract_id: canonical.id, updated_at: db.fn.now() });
+            }
+          }
           if (toDetach.length) {
             groupPlan.actions.push({
               type: 'detach_duplicate_contract_rooms',
@@ -388,15 +405,6 @@ async function repairDuplicateContractPayments({
                 )
                 .delete();
             }
-          }
-          if (leftOnStub.length) {
-            groupPlan.actions.push({
-              type: 'note_rooms_remain_on_soft_deleted_stub',
-              contractId: dup.id,
-              count: leftOnStub.length,
-              roomIds: leftOnStub.map((r) => r.room_id),
-              areas: leftOnStub.map((r) => Number(r.area || 0)),
-            });
           }
         }
 
