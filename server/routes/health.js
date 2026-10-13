@@ -686,6 +686,25 @@ router.get(
 );
 
 /**
+ * Read-only ledger inspect: contracts, room link dates, charges, payments.
+ * GET ?key=...&tenantLike=Заева&propertyId=1&year=2026
+ */
+router.get(
+  '/inspect-contract-ledger',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { inspectContractLedger } = require('../services/contractLedgerInspect');
+    const data = await inspectContractLedger({
+      propertyId: req.query.propertyId ? Number(req.query.propertyId) : 1,
+      year: req.query.year ? Number(req.query.year) : 2026,
+      tenantLike: req.query.tenantLike ? String(req.query.tenantLike) : null,
+      contractId: req.query.contractId ? Number(req.query.contractId) : null,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Align Mar–Sep (default) charges to room links. Dry-run by default; pass apply=true to write.
  * Body: { propertyId?, year?, fromMonth?, apply? }
  */
