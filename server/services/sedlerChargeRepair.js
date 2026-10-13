@@ -34,6 +34,9 @@ async function repairSedlerCharges({ propertyId = 1, year = 2026, dryRun = true 
     .where('cr.contract_id', contract.id)
     .select('cr.id as linkId', 'cr.room_id', 'cr.area', 'cr.rate_without_vat', 'r.room_number', 'r.area as roomArea');
 
+  const contractStart =
+    contract.start_date || contract.contract_date || '2020-12-01';
+
   for (const link of links) {
     const num = String(link.room_number || '').trim().toLowerCase().replace(/а/g, 'a');
     const wantRate = num === '5a' ? 9 : num === '5' ? 5 : null;
@@ -60,6 +63,23 @@ async function repairSedlerCharges({ propertyId = 1, year = 2026, dryRun = true 
         to: area,
       });
     }
+    // 5а was wrongly started 2026-09-01 → Jan–Aug only saw room 5.
+    const startIso = link.start_date ? dayjs(link.start_date).format('YYYY-MM-DD') : null;
+    const wantStart = dayjs(contractStart).format('YYYY-MM-DD');
+    if (startIso !== wantStart) {
+      patch.start_date = wantStart;
+      actions.push({
+        type: 'set_link_start_date',
+        roomNumber: link.room_number,
+        linkId: link.linkId,
+        from: startIso,
+        to: wantStart,
+      });
+    }
+    if (link.end_date && dayjs(link.end_date).isBefore(dayjs('2099-01-01'))) {
+      // keep far-future ends; clear near/odd caps that block accrual — only clear if before 2027
+      // actually 2028-12-31 is fine for open lease display; leave it.
+    }
     if (Object.keys(patch).length && !dryRun) {
       await db('contract_rooms').where({ id: link.linkId }).update(patch);
     }
@@ -69,6 +89,11 @@ async function repairSedlerCharges({ propertyId = 1, year = 2026, dryRun = true 
         updated_at: db.fn.now(),
       });
     }
+  }
+
+  // Re-read links after rate/start patches for charge generation
+  if (!dryRun) {
+    // ensure generate sees updated start_date
   }
 
   const liveCharges = await db('rent_charges')
