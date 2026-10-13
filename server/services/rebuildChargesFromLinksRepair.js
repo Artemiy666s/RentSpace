@@ -15,23 +15,37 @@ async function rebuildChargesFromLinks({
   propertyId = 1,
   year = 2026,
   tenantLike,
+  contractId = null,
   dryRun = true,
   reason = 'rebuild_charges_from_links',
 } = {}) {
   const pid = Number(propertyId) || 1;
   const y = Number(year) || dayjs().year();
-  if (!tenantLike) return { error: 'tenantLike_required', dryRun };
+  const cid = contractId ? Number(contractId) : null;
+  if (!tenantLike && !cid) return { error: 'tenantLike_or_contractId_required', dryRun };
 
-  const tenant = await db('tenants').where('name', 'like', `%${tenantLike}%`).whereNull('deleted_at').first();
-  if (!tenant) return { error: 'tenant_not_found', dryRun, tenantLike };
+  let contract;
+  let tenant;
+  if (cid) {
+    contract = await db('contracts')
+      .where({ id: cid, property_id: pid })
+      .whereNull('deleted_at')
+      .whereIn('status', ['active', 'expiring'])
+      .first();
+    if (!contract) return { error: 'live_contract_not_found', dryRun, contractId: cid };
+    tenant = await db('tenants').where({ id: contract.tenant_id }).first();
+  } else {
+    tenant = await db('tenants').where('name', 'like', `%${tenantLike}%`).whereNull('deleted_at').first();
+    if (!tenant) return { error: 'tenant_not_found', dryRun, tenantLike };
 
-  const contract = await db('contracts')
-    .where({ tenant_id: tenant.id, property_id: pid })
-    .whereNull('deleted_at')
-    .whereIn('status', ['active', 'expiring'])
-    .orderBy('id', 'asc')
-    .first();
-  if (!contract) return { error: 'live_contract_not_found', dryRun, tenantLike };
+    contract = await db('contracts')
+      .where({ tenant_id: tenant.id, property_id: pid })
+      .whereNull('deleted_at')
+      .whereIn('status', ['active', 'expiring'])
+      .orderBy('id', 'asc')
+      .first();
+    if (!contract) return { error: 'live_contract_not_found', dryRun, tenantLike };
+  }
 
   const links = await db('contract_rooms as cr')
     .join('rooms as r', 'r.id', 'cr.room_id')

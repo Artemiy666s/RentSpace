@@ -511,14 +511,15 @@ router.post(
     if (!assertRepairKey(req, res)) return;
     const { rebuildChargesFromLinks } = require('../services/rebuildChargesFromLinksRepair');
     const body = req.body || {};
-    if (!body.tenantLike) {
-      res.status(400).json({ success: false, error: 'tenantLike required' });
+    if (!body.tenantLike && !body.contractId) {
+      res.status(400).json({ success: false, error: 'tenantLike or contractId required' });
       return;
     }
     const data = await rebuildChargesFromLinks({
       propertyId: body.propertyId ? Number(body.propertyId) : 1,
       year: body.year ? Number(body.year) : new Date().getFullYear(),
-      tenantLike: String(body.tenantLike),
+      tenantLike: body.tenantLike ? String(body.tenantLike) : null,
+      contractId: body.contractId ? Number(body.contractId) : null,
       dryRun: body.apply !== true && body.dryRun !== false,
       reason: body.reason || 'rebuild_charges_from_links',
     });
