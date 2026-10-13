@@ -666,6 +666,25 @@ router.post(
 );
 
 /**
+ * Read-only: expected rent from room links vs charged rent for a month (default Sept 2026).
+ * GET ?key=...&propertyId=1&year=2026&month=9
+ */
+router.get(
+  '/audit-sept-room-charges',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { auditSeptRoomCharges } = require('../services/septRoomChargeAudit');
+    const data = await auditSeptRoomCharges({
+      propertyId: req.query.propertyId ? Number(req.query.propertyId) : 1,
+      year: req.query.year ? Number(req.query.year) : 2026,
+      month: req.query.month ? Number(req.query.month) : 9,
+      eps: req.query.eps != null ? Number(req.query.eps) : 0.02,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Paper-list cleanup: detach wrong rooms, close Borzenko from March, attach Vlasenko room 2, merge dups.
  * Dry-run by default; pass apply=true to write.
  */
