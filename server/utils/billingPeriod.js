@@ -6,6 +6,21 @@
 
 const CHARGE_DAY = 15;
 
+/** Электронный учёт долга: месяцы до этой даты не входят в задолженность (вели вручную). */
+const DEBT_LEDGER_START_YEAR = 2026;
+const DEBT_LEDGER_START_MONTH = 6;
+
+/**
+ * С какого месяца года (1–12) считать долг.
+ * 13 — ни одного месяца (год раньше старта учёта).
+ */
+function debtLedgerStartMonth(year) {
+  const y = Number(year);
+  if (y > DEBT_LEDGER_START_YEAR) return 1;
+  if (y < DEBT_LEDGER_START_YEAR) return 13;
+  return DEBT_LEDGER_START_MONTH;
+}
+
 function nowInMinsk(asOf = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Minsk',
@@ -52,6 +67,9 @@ function maxDueUtilityMonth(year, asOf = new Date()) {
 
 module.exports = {
   CHARGE_DAY,
+  DEBT_LEDGER_START_YEAR,
+  DEBT_LEDGER_START_MONTH,
+  debtLedgerStartMonth,
   nowInMinsk,
   maxDueRentMonth,
   maxDueUtilityMonth,

@@ -1,6 +1,6 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
-const { maxDueRentMonth } = require('../utils/billingPeriod');
+const { maxDueRentMonth, debtLedgerStartMonth } = require('../utils/billingPeriod');
 const { lastDueRentYm, ensureDueRentCharges } = require('./chargeService');
 const { cacheWrap, cacheDelPrefix } = require('../utils/ttlCache');
 
@@ -227,7 +227,8 @@ async function listTenantsTable(query, orgId) {
 async function computeContractsDebt(propertyId, year, contractIds) {
   if (!contractIds.length) return {};
   const dueThrough = maxDueRentMonth(year);
-  if (dueThrough <= 0) {
+  const debtFrom = debtLedgerStartMonth(year);
+  if (dueThrough <= 0 || debtFrom > dueThrough) {
     return Object.fromEntries(contractIds.map((id) => [id, 0]));
   }
 
@@ -235,6 +236,7 @@ async function computeContractsDebt(propertyId, year, contractIds) {
     .where({ property_id: propertyId, period_year: year })
     .whereNot('status', 'cancelled')
     .whereIn('contract_id', contractIds)
+    .where('period_month', '>=', debtFrom)
     .where('period_month', '<=', dueThrough)
     .groupBy('contract_id')
     .sum('amount_with_vat as total')
@@ -242,6 +244,7 @@ async function computeContractsDebt(propertyId, year, contractIds) {
   const payRows = await db('payments')
     .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
     .whereIn('contract_id', contractIds)
+    .where('period_month', '>=', debtFrom)
     .groupBy('contract_id')
     .sum('amount as total')
     .select('contract_id');
@@ -563,7 +566,7 @@ async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
   const ensureCharges = options.ensureCharges !== false;
   // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
-  const cacheKey = `rent-register:v4:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
+  const cacheKey = `rent-register:v5:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
@@ -574,6 +577,7 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
     cacheDelPrefix(`rent-register:v4:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v5:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
     cacheDelPrefix(`dashboard:v2:${propertyId}:`);
     cacheDelPrefix(`dashboard:v3:${propertyId}:`);
@@ -709,12 +713,9 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     rentMap[key] = Number(row.total);
   }
   const rentPaidMap = {};
-  const paidMap = {};
   for (const row of rentPayByContractMonth) {
     const key = `${row.contract_id}-${row.period_month}`;
-    const amount = Number(row.total);
-    rentPaidMap[key] = amount;
-    paidMap[row.contract_id] = (paidMap[row.contract_id] || 0) + amount;
+    rentPaidMap[key] = Number(row.total);
   }
   const utilMap = {};
   for (const row of utilByContractMonth) {
@@ -782,6 +783,7 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
   }
 
   const dueThrough = maxDueRentMonth(year);
+  const debtFrom = debtLedgerStartMonth(year);
 
   return links.map((row, idx) => {
     const rooms = roomsByContract[row.contract_id] || [];
@@ -789,6 +791,7 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     let totalRent = 0;
     let totalUtil = 0;
     let dueRent = 0;
+    let paidForDebt = 0;
     for (let m = 1; m <= 12; m++) {
       const rk = `${row.contract_id}-${m}`;
       const monthRooms = chargeRoomsByContractMonth[rk] || [];
@@ -801,11 +804,12 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
-      if (m <= dueThrough) dueRent += months[m].rent;
+      // Долг только с июня 2026 (старт электронного учёта); янв–май — бумажный период.
+      if (m >= debtFrom && m <= dueThrough) dueRent += months[m].rent;
+      if (m >= debtFrom) paidForDebt += months[m].paid;
     }
-    const paid = paidMap[row.contract_id] || 0;
-    // Задолженность = аренда только по уже начисленным месяцам − оплаты аренды за год.
-    const debt = Math.max(0, dueRent - paid);
+    // Задолженность = аренда с месяца старта учёта − оплаты за те же месяцы.
+    const debt = Math.max(0, dueRent - paidForDebt);
     const contractNumber = row.contract_number || '';
     const contractDate = toDateInput(row.contract_date);
     const endDate = toDateInput(row.end_date);
