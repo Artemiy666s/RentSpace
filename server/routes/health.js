@@ -685,6 +685,27 @@ router.get(
 );
 
 /**
+ * Align Mar–Sep (default) charges to room links. Dry-run by default; pass apply=true to write.
+ * Body: { propertyId?, year?, fromMonth?, apply? }
+ */
+router.post(
+  '/repair-align-charges-to-rooms',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { alignChargesToRooms } = require('../services/alignChargesToRoomsRepair');
+    const body = req.body || {};
+    const data = await alignChargesToRooms({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : 2026,
+      fromMonth: body.fromMonth != null ? Number(body.fromMonth) : 3,
+      dryRun: body.apply !== true && body.dryRun !== false,
+      eps: body.eps != null ? Number(body.eps) : 0.02,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Paper-list cleanup: detach wrong rooms, close Borzenko from March, attach Vlasenko room 2, merge dups.
  * Dry-run by default; pass apply=true to write.
  */
