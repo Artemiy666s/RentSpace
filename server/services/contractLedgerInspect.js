@@ -1,4 +1,5 @@
 const { db } = require('../db');
+const { maxDueRentMonth, debtLedgerStartMonth } = require('../utils/billingPeriod');
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -94,12 +95,18 @@ async function inspectContractLedger({
       byMonth[m].paid = roundMoney(byMonth[m].paid + Number(p.amount || 0));
     }
 
+    const dueThrough = maxDueRentMonth(y);
+    const debtFrom = debtLedgerStartMonth(y);
     const dueCharged = roundMoney(
       Object.entries(byMonth)
-        .filter(([m]) => Number(m) <= 9)
+        .filter(([m]) => Number(m) >= debtFrom && Number(m) <= dueThrough)
         .reduce((s, [, v]) => s + v.charged, 0)
     );
-    const yearPaid = roundMoney(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
+    const yearPaid = roundMoney(
+      payments
+        .filter((p) => Number(p.period_month) >= debtFrom)
+        .reduce((s, p) => s + Number(p.amount || 0), 0)
+    );
 
     out.push({
       ...c,
@@ -121,6 +128,8 @@ async function inspectContractLedger({
       payments,
       dueCharged,
       yearPaid,
+      debtFrom,
+      dueThrough,
       registerDebt: Math.max(0, roundMoney(dueCharged - yearPaid)),
     });
   }

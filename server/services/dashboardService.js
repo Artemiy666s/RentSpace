@@ -86,7 +86,7 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   }
   utilMonths.sort((a, b) => b.month - a.month);
 
-  // Задолженность по коммуналке — due с июня 2026, оплаты за весь год.
+  // Задолженность по коммуналке — due и оплаты только с июня 2026.
   const utilMonthDebtTotals = {};
   let utilityDebt = 0;
   for (const row of registerRows) {
@@ -96,7 +96,7 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
       if (m >= debtFrom && m <= utilDueThrough) {
         dueUtil += Number(row.months?.[m]?.utility || 0);
       }
-      utilPaidForDebt += Number(row.months?.[m]?.utilityPaid || 0);
+      if (m >= debtFrom) utilPaidForDebt += Number(row.months?.[m]?.utilityPaid || 0);
     }
     const contractUtilDebt = roundMoney(Math.max(0, dueUtil - utilPaidForDebt));
     if (contractUtilDebt <= 0.005) continue;
@@ -321,7 +321,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 async function getManagerDashboard(propertyId, organizationId) {
   const pid = Number(propertyId);
   const oid = organizationId == null ? 0 : Number(organizationId);
-  const cacheKey = `dashboard:v4:${pid}:${oid}`;
+  const cacheKey = `dashboard:v5:${pid}:${oid}`;
 
   return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
     const today = dayjs().format('YYYY-MM-DD');
