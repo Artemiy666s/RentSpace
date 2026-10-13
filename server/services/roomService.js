@@ -190,8 +190,15 @@ async function getRoomDetails(roomId) {
     ? Number(activeLink.room_rate || activeLink.rate_without_vat)
     : Number(room.current_rate_without_vat || room.recommended_rate_without_vat || 0);
 
+  // Card must match map: open lease ⇒ occupied (even if rooms.status drifted to free).
+  let status = room.status;
+  if (activeLink && !['occupied', 'debt'].includes(status)) {
+    status = 'occupied';
+  }
+
   return {
     ...room,
+    status,
     property,
     building,
     floor,

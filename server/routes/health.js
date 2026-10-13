@@ -466,6 +466,23 @@ router.post(
 );
 
 /**
+ * Mark rooms occupied when they have an open lease but status is still free.
+ */
+router.post(
+  '/repair-sync-leased-room-status',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairSyncLeasedRoomStatus } = require('../services/syncLeasedRoomStatusRepair');
+    const body = req.body || {};
+    const data = await repairSyncLeasedRoomStatus({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Rebuild Седлер rent charges with dual rates (5а@9, 5@5).
  * Dry-run by default; pass apply=true to write.
  */
