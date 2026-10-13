@@ -686,6 +686,25 @@ router.get(
 );
 
 /**
+ * Fix 19xx contract_rooms.start_date (e.g. 1926→2026) and cancel pre-start charges.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-link-start-century',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairLinkStartCentury } = require('../services/fixLinkStartCenturyRepair');
+    const body = req.body || {};
+    const data = await repairLinkStartCentury({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : 2026,
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Read-only ledger inspect: contracts, room link dates, charges, payments.
  * GET ?key=...&tenantLike=Заева&propertyId=1&year=2026
  */
