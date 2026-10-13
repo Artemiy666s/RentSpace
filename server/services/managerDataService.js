@@ -244,7 +244,6 @@ async function computeContractsDebt(propertyId, year, contractIds) {
   const payRows = await db('payments')
     .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
     .whereIn('contract_id', contractIds)
-    .where('period_month', '>=', debtFrom)
     .groupBy('contract_id')
     .sum('amount as total')
     .select('contract_id');
@@ -566,7 +565,7 @@ async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
   const ensureCharges = options.ensureCharges !== false;
   // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
-  const cacheKey = `rent-register:v5:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
+  const cacheKey = `rent-register:v6:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
@@ -578,14 +577,17 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
     cacheDelPrefix(`rent-register:v4:${propertyId}:`);
     cacheDelPrefix(`rent-register:v5:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v6:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
     cacheDelPrefix(`dashboard:v2:${propertyId}:`);
     cacheDelPrefix(`dashboard:v3:${propertyId}:`);
+    cacheDelPrefix(`dashboard:v4:${propertyId}:`);
   } else {
     cacheDelPrefix('rent-register:');
     cacheDelPrefix('dashboard:v1:');
     cacheDelPrefix('dashboard:v2:');
     cacheDelPrefix('dashboard:v3:');
+    cacheDelPrefix('dashboard:v4:');
   }
 }
 
@@ -804,11 +806,12 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
-      // Долг только с июня 2026 (старт электронного учёта); янв–май — бумажный период.
+      // Долг только с июня 2026 (старт электронного учёта); янв–май в due не входят.
       if (m >= debtFrom && m <= dueThrough) dueRent += months[m].rent;
-      if (m >= debtFrom) paidForDebt += months[m].paid;
+      // Оплаты за весь год уменьшают долг (в т.ч. апрель–май как аванс/погашение).
+      paidForDebt += months[m].paid;
     }
-    // Задолженность = аренда с месяца старта учёта − оплаты за те же месяцы.
+    // Задолженность = аренда с месяца старта учёта − все оплаты аренды за год.
     const debt = Math.max(0, dueRent - paidForDebt);
     const contractNumber = row.contract_number || '';
     const contractDate = toDateInput(row.contract_date);

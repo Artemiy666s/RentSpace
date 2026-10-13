@@ -174,8 +174,8 @@ router.get(
 
     for (const row of debtors) {
       let remaining = roundMoney(row.debt);
-      const yearPaid = Object.entries(row.months || {}).reduce(
-        (s, [m, x]) => (Number(m) >= debtFrom ? s + Number(x.paid || 0) : s),
+      const yearPaid = Object.values(row.months || {}).reduce(
+        (s, x) => s + Number(x.paid || 0),
         0
       );
       for (let m = dueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
@@ -210,7 +210,6 @@ router.get(
     const [paySum, chargeSum] = await Promise.all([
       db('payments')
         .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-        .where('period_month', '>=', debtFrom)
         .sum('amount as s')
         .count('* as c')
         .first(),
