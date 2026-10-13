@@ -21,6 +21,7 @@ async function repairLinkStartCentury({
   const pid = Number(propertyId) || 1;
   const y = Number(year) || 2026;
 
+  // Prefer range compare — YEAR() can be flaky across MySQL/TiDB drivers.
   const badLinks = await db('contract_rooms as cr')
     .join('contracts as c', 'c.id', 'cr.contract_id')
     .join('tenants as t', 't.id', 'c.tenant_id')
@@ -28,8 +29,8 @@ async function repairLinkStartCentury({
     .where('c.property_id', pid)
     .whereNull('c.deleted_at')
     .whereNotNull('cr.start_date')
-    .whereRaw('YEAR(cr.start_date) >= ?', [minBadYear])
-    .whereRaw('YEAR(cr.start_date) <= ?', [maxBadYear])
+    .where('cr.start_date', '>=', `${minBadYear}-01-01`)
+    .where('cr.start_date', '<=', `${maxBadYear}-12-31`)
     .select(
       'cr.id as linkId',
       'cr.contract_id',
