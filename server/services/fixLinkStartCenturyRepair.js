@@ -21,16 +21,15 @@ async function repairLinkStartCentury({
   const pid = Number(propertyId) || 1;
   const y = Number(year) || 2026;
 
-  // Prefer range compare — YEAR() can be flaky across MySQL/TiDB drivers.
-  const badLinks = await db('contract_rooms as cr')
+  // Load candidates in JS — SQL YEAR()/range filters proved unreliable on this TiDB path.
+  const allLinks = await db('contract_rooms as cr')
     .join('contracts as c', 'c.id', 'cr.contract_id')
     .join('tenants as t', 't.id', 'c.tenant_id')
     .join('rooms as r', 'r.id', 'cr.room_id')
     .where('c.property_id', pid)
     .whereNull('c.deleted_at')
     .whereNotNull('cr.start_date')
-    .where('cr.start_date', '>=', `${minBadYear}-01-01`)
-    .where('cr.start_date', '<=', `${maxBadYear}-12-31`)
+    .whereIn('c.status', ['active', 'expiring'])
     .select(
       'cr.id as linkId',
       'cr.contract_id',
@@ -44,6 +43,16 @@ async function repairLinkStartCentury({
       't.name as tenantName',
       'r.room_number'
     );
+
+  const badLinks = allLinks.filter((row) => {
+    const yLink = dayjs(row.linkStart).year();
+    if (yLink >= minBadYear && yLink <= maxBadYear) return true;
+    // Also catch "exactly 100 years before contract start"
+    const anchor = row.contractStart || row.contractDate;
+    if (!anchor) return false;
+    const yContract = dayjs(anchor).year();
+    return yContract - yLink === 100;
+  });
 
   const plans = [];
   for (const row of badLinks) {
