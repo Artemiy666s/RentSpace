@@ -623,6 +623,9 @@ export const en: TranslationTree = {
     viewSplit: 'Rent / utilities',
     viewLabel: 'Table view',
     totalRow: 'TOTAL',
+    monthlyAmounts: 'Monthly amounts',
+    roomBreakdown: 'By room',
+    roomBreakdownHint: 'Area × rate for each room',
   },
   tenants: {
     title: 'Tenants & contracts',

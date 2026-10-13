@@ -563,7 +563,7 @@ async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
   const ensureCharges = options.ensureCharges !== false;
   // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
-  const cacheKey = `rent-register:v3:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
+  const cacheKey = `rent-register:v4:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
@@ -573,6 +573,7 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:${propertyId}:`);
     cacheDelPrefix(`rent-register:v2:${propertyId}:`);
     cacheDelPrefix(`rent-register:v3:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v4:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
     cacheDelPrefix(`dashboard:v2:${propertyId}:`);
     cacheDelPrefix(`dashboard:v3:${propertyId}:`);
@@ -631,30 +632,76 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     )
     .orderBy('t.name', 'asc');
 
-  const [rentByContractMonth, rentPayByContractMonth, utilByContractMonth, utilPayByContractMonth] =
-    await Promise.all([
-      db('rent_charges')
-        .where({ property_id: propertyId, period_year: year })
-        .whereNot('status', 'cancelled')
-        .groupBy('contract_id', 'period_month')
-        .sum('amount_with_vat as total')
-        .select('contract_id', 'period_month'),
-      db('payments')
-        .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-        .groupBy('contract_id', 'period_month')
-        .sum('amount as total')
-        .select('contract_id', 'period_month'),
-      db('utility_charges')
-        .where({ property_id: propertyId, period_year: year })
-        .groupBy('contract_id', 'period_month')
-        .sum('amount as total')
-        .select('contract_id', 'period_month'),
-      db('payments')
-        .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
-        .groupBy('contract_id', 'period_month')
-        .sum('amount as total')
-        .select('contract_id', 'period_month'),
-    ]);
+  const contractIds = links.map((row) => row.contract_id);
+  const round2 = (v) => Math.round(Number(v || 0) * 100) / 100;
+
+  const [
+    rentByContractMonth,
+    rentPayByContractMonth,
+    utilByContractMonth,
+    utilPayByContractMonth,
+    roomLinkRows,
+    rentChargeRoomRows,
+  ] = await Promise.all([
+    db('rent_charges')
+      .where({ property_id: propertyId, period_year: year })
+      .whereNot('status', 'cancelled')
+      .groupBy('contract_id', 'period_month')
+      .sum('amount_with_vat as total')
+      .select('contract_id', 'period_month'),
+    db('payments')
+      .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+      .groupBy('contract_id', 'period_month')
+      .sum('amount as total')
+      .select('contract_id', 'period_month'),
+    db('utility_charges')
+      .where({ property_id: propertyId, period_year: year })
+      .groupBy('contract_id', 'period_month')
+      .sum('amount as total')
+      .select('contract_id', 'period_month'),
+    db('payments')
+      .where({ property_id: propertyId, period_year: year, payment_type: 'utilities' })
+      .groupBy('contract_id', 'period_month')
+      .sum('amount as total')
+      .select('contract_id', 'period_month'),
+    contractIds.length
+      ? db('contract_rooms as cr')
+          .join('rooms as r', 'r.id', 'cr.room_id')
+          .leftJoin('buildings as b', 'b.id', 'r.building_id')
+          .whereIn('cr.contract_id', contractIds)
+          .whereNull('r.deleted_at')
+          .modify((qb) => {
+            if (bid) qb.where('r.building_id', bid);
+          })
+          .select(
+            'cr.contract_id',
+            'cr.room_id',
+            'cr.area',
+            'cr.rate_without_vat',
+            'r.room_number',
+            'b.name as building_name'
+          )
+          .orderBy(['cr.contract_id', 'r.room_number'])
+      : Promise.resolve([]),
+    contractIds.length
+      ? db('rent_charges as rc')
+          .leftJoin('rooms as r', 'r.id', 'rc.room_id')
+          .where({ 'rc.property_id': propertyId, 'rc.period_year': year })
+          .whereNot('rc.status', 'cancelled')
+          .whereIn('rc.contract_id', contractIds)
+          .select(
+            'rc.contract_id',
+            'rc.period_month',
+            'rc.room_id',
+            'rc.area',
+            'rc.rate_without_vat',
+            'rc.amount_without_vat',
+            'rc.amount_with_vat',
+            'r.room_number'
+          )
+          .orderBy(['rc.contract_id', 'rc.period_month', 'r.room_number'])
+      : Promise.resolve([]),
+  ]);
 
   const rentMap = {};
   for (const row of rentByContractMonth) {
@@ -680,20 +727,77 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     utilPaidMap[key] = Number(row.total);
   }
 
+  const roomsByContract = {};
+  for (const row of roomLinkRows) {
+    const area = Number(row.area) || 0;
+    const rate = Number(row.rate_without_vat) || 0;
+    const amountWithoutVat = round2(area * rate);
+    const amountWithVat = round2(amountWithoutVat * 1.2);
+    const label = row.room_number
+      ? row.building_name
+        ? `${row.building_name} / ${row.room_number}`
+        : String(row.room_number)
+      : row.room_id
+        ? `#${row.room_id}`
+        : '—';
+    if (!roomsByContract[row.contract_id]) roomsByContract[row.contract_id] = [];
+    roomsByContract[row.contract_id].push({
+      roomId: row.room_id,
+      roomNumber: row.room_number || null,
+      label,
+      area,
+      rateWithoutVat: rate,
+      amountWithoutVat,
+      amountWithVat,
+      formula: `${area} × ${rate} = ${amountWithoutVat.toFixed(2)} (+НДС ${amountWithVat.toFixed(2)})`,
+    });
+  }
+
+  const chargeRoomsByContractMonth = {};
+  for (const row of rentChargeRoomRows) {
+    const key = `${row.contract_id}-${row.period_month}`;
+    const area = Number(row.area) || 0;
+    const rate = Number(row.rate_without_vat) || 0;
+    const amountWithoutVat = round2(row.amount_without_vat);
+    const amountWithVat = round2(row.amount_with_vat);
+    const label = row.room_number
+      ? String(row.room_number)
+      : row.room_id
+        ? `#${row.room_id}`
+        : 'договор';
+    if (!chargeRoomsByContractMonth[key]) chargeRoomsByContractMonth[key] = [];
+    chargeRoomsByContractMonth[key].push({
+      roomId: row.room_id,
+      roomNumber: row.room_number || null,
+      label,
+      area,
+      rateWithoutVat: rate,
+      amountWithoutVat,
+      amountWithVat,
+      formula:
+        area > 0 && rate > 0
+          ? `${area} × ${rate} = ${amountWithoutVat.toFixed(2)} → ${amountWithVat.toFixed(2)} с НДС`
+          : `${amountWithVat.toFixed(2)} с НДС`,
+    });
+  }
+
   const dueThrough = maxDueRentMonth(year);
 
   return links.map((row, idx) => {
+    const rooms = roomsByContract[row.contract_id] || [];
     const months = {};
     let totalRent = 0;
     let totalUtil = 0;
     let dueRent = 0;
     for (let m = 1; m <= 12; m++) {
       const rk = `${row.contract_id}-${m}`;
+      const monthRooms = chargeRoomsByContractMonth[rk] || [];
       months[m] = {
         rent: rentMap[rk] || 0,
         paid: rentPaidMap[rk] || 0,
         utility: utilMap[rk] || 0,
         utilityPaid: utilPaidMap[rk] || 0,
+        rooms: monthRooms,
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
@@ -705,6 +809,13 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     const contractNumber = row.contract_number || '';
     const contractDate = toDateInput(row.contract_date);
     const endDate = toDateInput(row.end_date);
+    const areaFormula =
+      rooms.length > 1
+        ? rooms.map((r) => `${r.area}×${r.rateWithoutVat}`).join(' + ') +
+          ` = ${round2(rooms.reduce((s, r) => s + r.amountWithoutVat, 0)).toFixed(2)}`
+        : rooms.length === 1
+          ? rooms[0].formula
+          : null;
     return {
       rowNum: idx + 1,
       contractId: row.contract_id,
@@ -720,6 +831,8 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
           : '',
       area: Number(row.total_area) || 0,
       rateWithoutVat: Number(row.rate_without_vat) || Number(row.contract_rate) || 0,
+      rooms,
+      areaFormula,
       months,
       totalRent,
       totalUtil,

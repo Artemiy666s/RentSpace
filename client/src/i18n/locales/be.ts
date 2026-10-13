@@ -623,6 +623,9 @@ export const be: TranslationTree = {
     viewSplit: 'Арэнда / камун.',
     viewLabel: 'Выгляд табліцы',
     totalRow: 'РАЗАМ',
+    monthlyAmounts: 'Сумы па месяцах',
+    roomBreakdown: 'Па памяшканнях',
+    roomBreakdownHint: 'Плошча × стаўка па кожным памяшканні',
   },
   tenants: {
     title: 'Арандатары і дагаворы',

@@ -624,6 +624,9 @@ export const ru: TranslationTree = {
     viewSplit: 'Аренда / коммун.',
     viewLabel: 'Вид таблицы',
     totalRow: 'ИТОГО',
+    monthlyAmounts: 'Суммы по месяцам',
+    roomBreakdown: 'По помещениям',
+    roomBreakdownHint: 'Площадь × ставка по каждому помещению',
   },
   tenants: {
     title: 'Арендаторы и договоры',
