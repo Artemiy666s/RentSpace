@@ -26,24 +26,24 @@ const ASSIGNMENTS = [
   { roomId: 180130, tenantLike: 'Пинчук', note: '56 / 2 / 3' },
   { roomId: 180131, tenantLike: 'Жукова', note: '56 / 2 / 4' },
   { roomId: 180142, tenantLike: 'Жалелова', note: '56 / 3 / 2' },
+  { roomId: 180147, tenantLike: 'СмартЛайн', note: '56 / 3 / 7' },
   { roomId: 210102, tenantLike: 'Бандюкевич', note: '56 / Бар / 888' },
-  // 180147 56/3/7 — blank, skip
 
   // Советская 56а
   { roomId: 180099, tenantLike: 'Волчек', note: '56а / 1 / 1' },
   { roomId: 180097, tenantLike: 'Сити Вуман', note: '56а / 1 / 3' },
-  // 695598 56а/1/8 — blank
+  { roomId: 695598, tenantLike: 'Забиран', note: '56а / 1 / 8' },
   { roomId: 270102, tenantLike: 'Рапеко', note: '56а / 2 / 1' },
-  // 270103 56а/2/3 — blank (detach stray БЛЭК УАЙТ below)
+  { roomId: 270103, tenantLike: 'БЛЭК', note: '56а / 2 / 3' },
   { roomId: 270106, tenantLike: 'БЛЭК', note: '56а / 2 / 4' },
   { roomId: 270109, tenantLike: 'Кадовба', note: '56а / 2 / 7' },
-  // 270110 56а/2/8 — blank
+  { roomId: 270110, tenantLike: 'Алондерис', note: '56а / 2 / 8' },
   { roomId: 180108, tenantLike: 'Флотабол', note: '56а / 3 / 3' },
   { roomId: 180115, tenantLike: 'Флотабол', note: '56а / 3 / 7' },
   { roomId: 180117, tenantLike: 'Борсук', note: '56а / 3 / 8' },
 
   // Советская 56е
-  // 180152 56е/1/1 — blank
+  { roomId: 180152, tenantLike: 'ДмиВе', note: '56е / 1 / 1' },
   { roomId: 180153, tenantLike: 'Барбершоп', note: '56е / 1 / 2' },
   { roomId: 180155, tenantLike: 'Ерошкин', note: '56е / 1 / 4' },
   { roomId: 180156, tenantLike: 'Налегач', note: '56е / 1 / 5' },
@@ -66,8 +66,6 @@ const ASSIGNMENTS = [
 
 /** Extra cleanups that prevent wrong labels / double debt surfaces. */
 const DETACH_IF_ON_TENANT = [
-  // Blank for now — was on БЛЭК УАЙТ
-  { roomId: 270103, detachTenantLike: 'БЛЭК', reason: 'manager_left_blank_56a_2_3' },
   // Gushchinsky's room 4 must not stay on Машевский
   { roomId: 390101, detachTenantLike: 'Машевск', reason: 'belongs_to_gushchinsky' },
   // Medvedskaya's 11а must not stay on Мерилин / ТехМонтаж
@@ -349,13 +347,7 @@ async function repairManualRoomTenantMap({ propertyId = 1, dryRun = true } = {})
     assignmentCount: ASSIGNMENTS.length,
     actions,
     verify,
-    blanksSkipped: [
-      '56 / 3 / 7',
-      '56а / 1 / 8',
-      '56а / 2 / 3',
-      '56а / 2 / 8',
-      '56е / 1 / 1',
-    ],
+    blanksSkipped: [],
   };
 }
 

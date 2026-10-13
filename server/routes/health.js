@@ -466,6 +466,50 @@ router.post(
 );
 
 /**
+ * Rebuild Седлер rent charges with dual rates (5а@9, 5@5).
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-sedler-charges',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairSedlerCharges } = require('../services/sedlerChargeRepair');
+    const body = req.body || {};
+    const data = await repairSedlerCharges({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : new Date().getFullYear(),
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
+ * Cancel + regenerate rent charges from current open room links.
+ * Body: { tenantLike, apply?, year?, propertyId? }
+ */
+router.post(
+  '/repair-rebuild-charges-from-links',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { rebuildChargesFromLinks } = require('../services/rebuildChargesFromLinksRepair');
+    const body = req.body || {};
+    if (!body.tenantLike) {
+      res.status(400).json({ success: false, error: 'tenantLike required' });
+      return;
+    }
+    const data = await rebuildChargesFromLinks({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : new Date().getFullYear(),
+      tenantLike: String(body.tenantLike),
+      dryRun: body.apply !== true && body.dryRun !== false,
+      reason: body.reason || 'rebuild_charges_from_links',
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Debug why map labels miss tenant names for rooms on a floor.
  * GET ?key=...&floorId=60008  or  &roomIds=390100,390101
  */
