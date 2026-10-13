@@ -118,11 +118,17 @@ async function generateRentCharges({
   const existingKeys = new Set(
     existingRows.map((row) => `${row.contract_id}:${row.room_id}`)
   );
+  // Legacy whole-contract rows (room_id null) already cover the month — do not also
+  // insert per-room lines (that doubles register totals until hygiene cancels one side).
+  const contractsWithNullRoomCharge = new Set(
+    existingRows.filter((row) => row.room_id == null).map((row) => Number(row.contract_id))
+  );
 
   const toInsert = [];
   for (const row of activeRooms) {
     const key = `${row.contract_id}:${row.room_id}`;
     if (existingKeys.has(key)) continue;
+    if (contractsWithNullRoomCharge.has(Number(row.contract_id))) continue;
 
     const amounts = calcRentAmount({
       area: row.area,

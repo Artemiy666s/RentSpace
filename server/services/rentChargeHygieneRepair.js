@@ -210,10 +210,45 @@ async function repairRentChargeHygiene({
     actions.push({ type: 'cancel_empty_stub_late_charges', contractCount: 0, count: 0 });
   }
 
-  // 5c) Same contract: more charge rows in Sept than in earlier months → drop extras
+  // 5b2) Legacy contract-level charge (room_id null) + per-room charge same month → drop null.
+  // Otherwise ensureDueRentCharges keeps recreating room rows beside the null one (exact ×2).
+  const nullBesideRoomIds = [];
+  const byContractMonth = new Map();
+  for (const row of dups) {
+    const key = `${row.contract_id}:${row.period_month}`;
+    if (!byContractMonth.has(key)) byContractMonth.set(key, []);
+    byContractMonth.get(key).push(row);
+  }
+  for (const rows of byContractMonth.values()) {
+    const hasRoom = rows.some((r) => r.room_id != null);
+    if (!hasRoom) continue;
+    for (const r of rows) {
+      if (r.room_id == null) nullBesideRoomIds.push(r.id);
+    }
+  }
+  actions.push({
+    type: 'cancel_null_room_beside_room_charges',
+    count: nullBesideRoomIds.length,
+    sum: roundMoney(
+      nullBesideRoomIds.reduce((s, id) => {
+        const row = dups.find((r) => r.id === id);
+        return s + Number(row?.amount_with_vat || 0);
+      }, 0)
+    ),
+  });
+  const nullBesideN = await cancelByIds(
+    nullBesideRoomIds,
+    dryRun,
+    'rent_charge_hygiene_null_beside_room'
+  );
+  const nullBesideSet = new Set(nullBesideRoomIds.map(Number));
+
+  // 5c) Same contract: more charge rows in Sept than in earlier months → drop extras.
+  // Prefer keeping rows with room_id (and newer/higher amount) so ensureDue does not recreate.
   const septExtraIds = [];
   const byContractCharges = new Map();
   for (const row of dups) {
+    if (nullBesideSet.has(Number(row.id))) continue;
     if (!byContractCharges.has(row.contract_id)) byContractCharges.set(row.contract_id, []);
     byContractCharges.get(row.contract_id).push(row);
   }
@@ -228,7 +263,14 @@ async function repairRentChargeHygiene({
     }
     const earlyMax = Math.max(0, ...Object.values(earlyCounts));
     if (earlyMax >= 1 && septRows.length > earlyMax) {
-      septRows.sort((a, b) => Number(b.amount_with_vat) - Number(a.amount_with_vat));
+      septRows.sort((a, b) => {
+        const aRoom = a.room_id != null ? 1 : 0;
+        const bRoom = b.room_id != null ? 1 : 0;
+        if (bRoom !== aRoom) return bRoom - aRoom;
+        const amt = Number(b.amount_with_vat) - Number(a.amount_with_vat);
+        if (amt !== 0) return amt;
+        return Number(b.id) - Number(a.id);
+      });
       const drop = septRows.slice(earlyMax);
       septExtraIds.push(...drop.map((r) => r.id));
     }
@@ -244,7 +286,6 @@ async function repairRentChargeHygiene({
     ),
   });
   const septExtraN = await cancelByIds(septExtraIds, dryRun, 'rent_charge_hygiene_extra_sept');
-
   // 6) Optional limited merge of leftover live duplicate contract numbers
   let postMergeCancelled = 0;
   if (Number(mergeLimit) > 0) {
@@ -308,6 +349,7 @@ async function repairRentChargeHygiene({
       zeroN +
       dupN +
       stubChargeIds.length +
+      nullBesideN +
       septExtraN +
       postMergeCancelled,
     actions,
