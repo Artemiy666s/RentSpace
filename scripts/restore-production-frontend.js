@@ -35,6 +35,15 @@ function main() {
     process.exit(1);
   }
 
+  // Guard against white-screen deploys from broken minified patches.
+  try {
+    // eslint-disable-next-line no-new-func
+    new Function(fs.readFileSync(jsPath, 'utf8'));
+  } catch (err) {
+    console.error('Production JS failed syntax check:', err.message);
+    process.exit(1);
+  }
+
   fs.mkdirSync(dest, { recursive: true });
   fs.cpSync(src, dest, { recursive: true });
 
