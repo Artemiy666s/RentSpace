@@ -566,7 +566,7 @@ async function listRentRegister(propertyId, year, buildingId, options = {}) {
   const bid = buildingId ? Number(buildingId) : null;
   const ensureCharges = options.ensureCharges !== false;
   // Разные ключи: дашборд (lite) не должен отдавать реестру кэш без ensureDueRentCharges.
-  const cacheKey = `rent-register:v7:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
+  const cacheKey = `rent-register:v8:${propertyId}:${year}:${bid || 'all'}:${ensureCharges ? 'e' : 'r'}`;
 
   return cacheWrap(cacheKey, 45_000, () => loadRentRegister(propertyId, year, bid, { ensureCharges }));
 }
@@ -580,6 +580,7 @@ function invalidateRentRegisterCache(propertyId) {
     cacheDelPrefix(`rent-register:v5:${propertyId}:`);
     cacheDelPrefix(`rent-register:v6:${propertyId}:`);
     cacheDelPrefix(`rent-register:v7:${propertyId}:`);
+    cacheDelPrefix(`rent-register:v8:${propertyId}:`);
     cacheDelPrefix(`dashboard:v1:${propertyId}:`);
     cacheDelPrefix(`dashboard:v2:${propertyId}:`);
     cacheDelPrefix(`dashboard:v3:${propertyId}:`);
@@ -861,37 +862,52 @@ function splitGrossAmount(gross) {
 }
 
 async function upsertRegisterRentCharge(contract, roomId, year, month, grossAmount, userId) {
-  const existing = await db('rent_charges')
+  const existingRows = await db('rent_charges')
     .where({
       contract_id: contract.id,
       period_year: year,
       period_month: month,
     })
     .whereNot('status', 'cancelled')
-    .first();
+    .orderBy('id', 'asc');
 
-  if (!grossAmount || grossAmount <= 0) {
-    if (existing) {
-      await db('rent_charges').where({ id: existing.id }).update({
-        status: 'cancelled',
-        amount_without_vat: 0,
-        vat_amount: 0,
-        amount_with_vat: 0,
-        manual_adjustment: true,
-        adjustment_reason: 'register_edit_zero',
-        updated_at: db.fn.now(),
-      });
+  const currentTotal = Math.round(
+    existingRows.reduce((s, r) => s + Number(r.amount_with_vat || 0), 0) * 100
+  ) / 100;
+  const target = Math.round((Number(grossAmount) || 0) * 100) / 100;
+
+  // Сохранение без изменения суммы — не трогаем разбивку по помещениям.
+  if (Math.abs(currentTotal - target) < 0.005) return;
+
+  if (target <= 0) {
+    if (existingRows.length) {
+      await db('rent_charges')
+        .whereIn(
+          'id',
+          existingRows.map((r) => r.id)
+        )
+        .update({
+          status: 'cancelled',
+          amount_without_vat: 0,
+          vat_amount: 0,
+          amount_with_vat: 0,
+          manual_adjustment: true,
+          adjustment_reason: 'register_edit_zero',
+          updated_at: db.fn.now(),
+        });
     }
     return;
   }
 
-  const { amountWithVat, net, vat } = splitGrossAmount(grossAmount);
+  const { amountWithVat, net, vat } = splitGrossAmount(target);
+  // Одна строка на месяц (room_id null), чтобы ensureDue не дописал помещения сверху
+  // и чтобы ручная сумма (каникулы и т.п.) реально заменила итог, а не одну из комнат.
   const payload = {
     organization_id: contract.organization_id,
     property_id: contract.property_id,
     tenant_id: contract.tenant_id,
     contract_id: contract.id,
-    room_id: roomId,
+    room_id: null,
     period_year: year,
     period_month: month,
     area: Number(contract.area) || 0,
@@ -902,11 +918,23 @@ async function upsertRegisterRentCharge(contract, roomId, year, month, grossAmou
     amount_with_vat: amountWithVat,
     status: 'charged',
     manual_adjustment: true,
+    adjustment_reason: 'register_manual_rent',
     updated_at: db.fn.now(),
   };
 
-  if (existing) {
-    await db('rent_charges').where({ id: existing.id }).update(payload);
+  const keep = existingRows.find((r) => r.room_id == null) || existingRows[0] || null;
+  const cancelIds = existingRows.filter((r) => !keep || r.id !== keep.id).map((r) => r.id);
+  if (cancelIds.length) {
+    await db('rent_charges').whereIn('id', cancelIds).update({
+      status: 'cancelled',
+      manual_adjustment: true,
+      adjustment_reason: 'register_manual_rent_replace',
+      updated_at: db.fn.now(),
+    });
+  }
+
+  if (keep) {
+    await db('rent_charges').where({ id: keep.id }).update(payload);
     return;
   }
   await db('rent_charges').insert({ ...payload, created_by: userId || null });
