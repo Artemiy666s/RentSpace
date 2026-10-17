@@ -445,7 +445,7 @@ async function vacateRoom({
     .where('cr.room_id', roomId)
     .whereIn('c.status', ['active', 'expiring'])
     .whereNull('c.deleted_at')
-    .select('cr.id', 'cr.start_date', 'cr.comment', 'c.id as contract_id', 'c.comment as contract_comment');
+    .select('cr.id', 'cr.start_date', 'c.id as contract_id', 'c.comment as contract_comment');
 
   // Не ждём ensureDue здесь: полный прогон месяцев вешает кнопку «Освободить»
   // (Vercel timeout / долгий ответ). Начисления подтянет реестр при следующем открытии.
@@ -468,7 +468,7 @@ async function vacateRoom({
       await db('contracts').where({ id: link.contract_id }).update({
         status: reason === 'debt' ? 'terminated' : 'completed',
         actual_end_date: endDate,
-        comment: comment || reason || link.contract_comment || link.comment,
+        comment: comment || reason || link.contract_comment || null,
         updated_at: db.fn.now(),
       });
     }
