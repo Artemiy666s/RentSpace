@@ -534,6 +534,25 @@ router.post(
 );
 
 /**
+ * Paper area fixes: Жалелова 88.1, Кадовба 8.8, БьютиСистем 62.9 + rebuild charges.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-paper-area-fixes',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairPaperAreaFixes } = require('../services/paperAreaFixRepair');
+    const body = req.body || {};
+    const data = await repairPaperAreaFixes({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : new Date().getFullYear(),
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Cancel + regenerate rent charges from current open room links.
  * Body: { tenantLike, apply?, year?, propertyId? }
  */
