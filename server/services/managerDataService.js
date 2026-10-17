@@ -1,6 +1,10 @@
 const dayjs = require('dayjs');
 const { db } = require('../db');
-const { maxDueRentMonth, debtLedgerStartMonth } = require('../utils/billingPeriod');
+const {
+  maxDueRentMonth,
+  debtLedgerStartMonth,
+  debtLedgerStartMonthForTenant,
+} = require('../utils/billingPeriod');
 const { lastDueRentYm, ensureDueRentCharges } = require('./chargeService');
 const { cacheWrap, cacheDelPrefix } = require('../utils/ttlCache');
 
@@ -227,34 +231,58 @@ async function listTenantsTable(query, orgId) {
 async function computeContractsDebt(propertyId, year, contractIds) {
   if (!contractIds.length) return {};
   const dueThrough = maxDueRentMonth(year);
-  const debtFrom = debtLedgerStartMonth(year);
-  if (dueThrough <= 0 || debtFrom > dueThrough) {
+  const earliestDebtFrom = debtLedgerStartMonth(year);
+  if (dueThrough <= 0 || earliestDebtFrom > dueThrough) {
     return Object.fromEntries(contractIds.map((id) => [id, 0]));
   }
 
-  const rentRows = await db('rent_charges')
-    .where({ property_id: propertyId, period_year: year })
-    .whereNot('status', 'cancelled')
-    .whereIn('contract_id', contractIds)
-    .where('period_month', '>=', debtFrom)
-    .where('period_month', '<=', dueThrough)
-    .groupBy('contract_id')
-    .sum('amount_with_vat as total')
-    .select('contract_id');
-  const payRows = await db('payments')
-    .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-    .whereIn('contract_id', contractIds)
-    .where('period_month', '>=', debtFrom)
-    .groupBy('contract_id')
-    .sum('amount as total')
-    .select('contract_id');
+  const [rentRows, payRows, contractRows] = await Promise.all([
+    db('rent_charges')
+      .where({ property_id: propertyId, period_year: year })
+      .whereNot('status', 'cancelled')
+      .whereIn('contract_id', contractIds)
+      .where('period_month', '>=', earliestDebtFrom)
+      .where('period_month', '<=', dueThrough)
+      .groupBy('contract_id', 'period_month')
+      .sum('amount_with_vat as total')
+      .select('contract_id', 'period_month'),
+    db('payments')
+      .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
+      .whereIn('contract_id', contractIds)
+      .where('period_month', '>=', earliestDebtFrom)
+      .groupBy('contract_id', 'period_month')
+      .sum('amount as total')
+      .select('contract_id', 'period_month'),
+    db('contracts as c')
+      .leftJoin('tenants as t', 't.id', 'c.tenant_id')
+      .whereIn('c.id', contractIds)
+      .select('c.id', 't.name as tenant_name'),
+  ]);
 
-  const rentMap = Object.fromEntries(rentRows.map((r) => [r.contract_id, Number(r.total)]));
-  const paidMap = Object.fromEntries(payRows.map((r) => [r.contract_id, Number(r.total)]));
+  const nameByContract = Object.fromEntries(
+    contractRows.map((r) => [r.id, r.tenant_name || ''])
+  );
+  const rentByCm = {};
+  for (const row of rentRows) {
+    rentByCm[`${row.contract_id}-${row.period_month}`] = Number(row.total);
+  }
+  const paidByCm = {};
+  for (const row of payRows) {
+    paidByCm[`${row.contract_id}-${row.period_month}`] = Number(row.total);
+  }
 
   const debtMap = {};
   for (const id of contractIds) {
-    debtMap[id] = Math.max(0, (rentMap[id] || 0) - (paidMap[id] || 0));
+    const debtFrom = debtLedgerStartMonthForTenant(year, nameByContract[id]);
+    let dueRent = 0;
+    let paidForDebt = 0;
+    for (let m = debtFrom; m <= dueThrough; m += 1) {
+      dueRent += rentByCm[`${id}-${m}`] || 0;
+    }
+    for (let m = debtFrom; m <= 12; m += 1) {
+      paidForDebt += paidByCm[`${id}-${m}`] || 0;
+    }
+    debtMap[id] = Math.max(0, dueRent - paidForDebt);
   }
   return debtMap;
 }
@@ -790,7 +818,6 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
   }
 
   const dueThrough = maxDueRentMonth(year);
-  const debtFrom = debtLedgerStartMonth(year);
 
   return links.map((row, idx) => {
     const rooms = roomsByContract[row.contract_id] || [];
@@ -799,6 +826,8 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
     let totalUtil = 0;
     let dueRent = 0;
     let paidForDebt = 0;
+    // 2026: у всех, кроме Darkwood Soft, долг с сентября (июнь–август — бумага).
+    const debtFrom = debtLedgerStartMonthForTenant(year, row.tenant_name);
     for (let m = 1; m <= 12; m++) {
       const rk = `${row.contract_id}-${m}`;
       const monthRooms = chargeRoomsByContractMonth[rk] || [];
@@ -811,11 +840,9 @@ async function loadRentRegister(propertyId, year, bid, options = {}) {
       };
       totalRent += months[m].rent;
       totalUtil += months[m].utility;
-      // Долг с июня 2026: янв–май (бумажный период) не входят ни в due, ни в оплаты долга.
       if (m >= debtFrom && m <= dueThrough) dueRent += months[m].rent;
       if (m >= debtFrom) paidForDebt += months[m].paid;
     }
-    // Задолженность = аренда с июня − оплаты с июня (ранние платежи не «перекрывают» лето).
     const debt = Math.max(0, dueRent - paidForDebt);
     const contractNumber = row.contract_number || '';
     const contractDate = toDateInput(row.contract_date);

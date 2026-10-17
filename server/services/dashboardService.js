@@ -6,6 +6,7 @@ const {
   maxDueRentMonth,
   maxDueUtilityMonth,
   debtLedgerStartMonth,
+  debtLedgerStartMonthForTenant,
   nowInMinsk,
 } = require('../utils/billingPeriod');
 const { roomRentableArea, isOccupiedForArea, sumRentableArea } = require('../utils/rentableArea');
@@ -81,7 +82,6 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   const registerRows =
     registerRowsPreloaded || (await listRentRegister(propertyId, year, null, { ensureCharges: false }));
   const dueThrough = maxDueRentMonth(year);
-  const debtFrom = debtLedgerStartMonth(year);
 
   const monthTotals = {};
   const debtBreakdown = [];
@@ -90,6 +90,7 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     const registerDebt = roundMoney(row.debt || 0);
     if (registerDebt <= 0.005) continue;
 
+    const debtFrom = debtLedgerStartMonthForTenant(year, row.tenantName);
     const months = allocateDebtByMonth(registerDebt, row.months, debtFrom, dueThrough);
     for (const { month, debt } of months) {
       monthTotals[month] = roundMoney((monthTotals[month] || 0) + debt);
@@ -133,10 +134,11 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   }
   utilMonths.sort((a, b) => b.month - a.month);
 
-  // Задолженность по коммуналке — due и оплаты только с июня 2026.
+  // Задолженность по коммуналке — с тем же стартом учёта, что и аренда.
   const utilMonthDebtTotals = {};
   let utilityDebt = 0;
   for (const row of registerRows) {
+    const debtFrom = debtLedgerStartMonthForTenant(year, row.tenantName);
     let dueUtil = 0;
     let utilPaidForDebt = 0;
     for (let m = 1; m <= 12; m++) {

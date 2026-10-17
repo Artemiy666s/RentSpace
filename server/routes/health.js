@@ -153,13 +153,17 @@ router.get(
     }
 
     const { listRentRegister } = require('../services/managerDataService');
-    const { maxDueRentMonth, debtLedgerStartMonth } = require('../utils/billingPeriod');
+    const {
+      maxDueRentMonth,
+      debtLedgerStartMonth,
+      debtLedgerStartMonthForTenant,
+    } = require('../utils/billingPeriod');
     const { db } = require('../db');
 
     const propertyId = Number(req.query.propertyId) || 2;
     const year = Number(req.query.year) || new Date().getFullYear();
     const dueThrough = maxDueRentMonth(year);
-    const debtFrom = debtLedgerStartMonth(year);
+    const earliestDebtFrom = debtLedgerStartMonth(year);
     const focusMonths = String(req.query.months || '2,3,4,5')
       .split(',')
       .map((x) => Number(x))
@@ -173,6 +177,7 @@ router.get(
     const contributors = {};
 
     for (const row of debtors) {
+      const debtFrom = debtLedgerStartMonthForTenant(year, row.tenantName);
       const yearPaid = Object.entries(row.months || {}).reduce(
         (s, [m, x]) => (Number(m) >= debtFrom ? s + Number(x.paid || 0) : s),
         0
@@ -220,14 +225,14 @@ router.get(
     const [paySum, chargeSum] = await Promise.all([
       db('payments')
         .where({ property_id: propertyId, period_year: year, payment_type: 'rent' })
-        .where('period_month', '>=', debtFrom)
+        .where('period_month', '>=', earliestDebtFrom)
         .sum('amount as s')
         .count('* as c')
         .first(),
       db('rent_charges')
         .where({ property_id: propertyId, period_year: year })
         .whereNot('status', 'cancelled')
-        .where('period_month', '>=', debtFrom)
+        .where('period_month', '>=', earliestDebtFrom)
         .where('period_month', '<=', dueThrough)
         .sum('amount_with_vat as s')
         .count('* as c')

@@ -8,7 +8,16 @@ const CHARGE_DAY = 15;
 
 /** Электронный учёт долга: месяцы до этой даты не входят в задолженность (вели вручную). */
 const DEBT_LEDGER_START_YEAR = 2026;
+/** Darkwood Soft — единственный должник июня–августа 2026 (бумажный период у остальных). */
 const DEBT_LEDGER_START_MONTH = 6;
+/** Остальные арендаторы: электронный долг с сентября 2026. */
+const DEBT_LEDGER_GENERAL_START_MONTH = 9;
+
+const EARLY_DEBT_TENANT_RE = /дарквуд|darkwood/i;
+
+function isEarlyDebtTenant(tenantName) {
+  return EARLY_DEBT_TENANT_RE.test(String(tenantName || ''));
+}
 
 /**
  * С какого месяца года (1–12) считать долг.
@@ -19,6 +28,16 @@ function debtLedgerStartMonth(year) {
   if (y > DEBT_LEDGER_START_YEAR) return 1;
   if (y < DEBT_LEDGER_START_YEAR) return 13;
   return DEBT_LEDGER_START_MONTH;
+}
+
+/**
+ * Старт долга по арендатору: в 2026 у всех, кроме Darkwood Soft, — с сентября.
+ */
+function debtLedgerStartMonthForTenant(year, tenantName) {
+  const base = debtLedgerStartMonth(year);
+  if (Number(year) !== DEBT_LEDGER_START_YEAR) return base;
+  if (isEarlyDebtTenant(tenantName)) return DEBT_LEDGER_START_MONTH;
+  return DEBT_LEDGER_GENERAL_START_MONTH;
 }
 
 function nowInMinsk(asOf = new Date()) {
@@ -69,7 +88,10 @@ module.exports = {
   CHARGE_DAY,
   DEBT_LEDGER_START_YEAR,
   DEBT_LEDGER_START_MONTH,
+  DEBT_LEDGER_GENERAL_START_MONTH,
+  isEarlyDebtTenant,
   debtLedgerStartMonth,
+  debtLedgerStartMonthForTenant,
   nowInMinsk,
   maxDueRentMonth,
   maxDueUtilityMonth,
