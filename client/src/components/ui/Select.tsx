@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { useI18n } from '@/i18n/useI18n';
 import { isFieldEmpty } from '@/lib/isFieldEmpty';
@@ -26,6 +27,14 @@ interface SelectProps {
   'aria-label'?: string;
 }
 
+type MenuPos = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  openUp: boolean;
+};
+
 export function Select({
   value,
   onChange,
@@ -47,15 +56,36 @@ export function Select({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
   const [open, setOpen] = useState(false);
-  const [openUp, setOpenUp] = useState(false);
+  const [pos, setPos] = useState<MenuPos | null>(null);
 
   const selected = options.find((o) => o.value === value);
   const displayLabel = selected?.label ?? placeholder ?? '';
 
+  const updatePos = () => {
+    if (!rootRef.current) return;
+    const rect = rootRef.current.getBoundingClientRect();
+    const pad = 12;
+    const gap = 6;
+    const estimated = Math.min(options.length * 46 + 16, 280);
+    const spaceBelow = window.innerHeight - rect.bottom - pad;
+    const spaceAbove = rect.top - pad;
+    const openUp = spaceBelow < estimated && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(120, Math.min(280, openUp ? spaceAbove - gap : spaceBelow - gap));
+    setPos({
+      top: openUp ? rect.top - gap : rect.bottom + gap,
+      left: rect.left,
+      width: rect.width,
+      maxHeight,
+      openUp,
+    });
+  };
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
@@ -69,11 +99,18 @@ export function Select({
   }, [open]);
 
   useLayoutEffect(() => {
-    if (!open || !rootRef.current || !menuRef.current) return;
-    const rect = rootRef.current.getBoundingClientRect();
-    const menuHeight = menuRef.current.offsetHeight || 280;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    setOpenUp(spaceBelow < menuHeight + 12 && rect.top > menuHeight);
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    updatePos();
+    const onReposition = () => updatePos();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
   }, [open, options.length]);
 
   const pick = (next: string) => {
@@ -99,29 +136,39 @@ export function Select({
         <span className={styles.triggerLabel}>{displayLabel}</span>
         <ChevronDown size={18} className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`} aria-hidden />
       </button>
-      {open && (
-        <ul
-          ref={menuRef}
-          className={`${styles.menu} ${openUp ? styles.menuUp : ''}`}
-          role="listbox"
-          aria-labelledby={selectId}
-        >
-          {options.map((opt) => (
-            <li key={opt.value} role="presentation">
-              <button
-                type="button"
-                role="option"
-                aria-selected={opt.value === value}
-                disabled={opt.disabled}
-                className={`${styles.option} ${opt.value === value ? styles.optionActive : ''}`}
-                onClick={() => !opt.disabled && pick(opt.value)}
-              >
-                {opt.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open &&
+        pos &&
+        createPortal(
+          <ul
+            ref={menuRef}
+            className={styles.menuPortal}
+            style={{
+              top: pos.top,
+              left: pos.left,
+              width: pos.width,
+              maxHeight: pos.maxHeight,
+              transform: pos.openUp ? 'translateY(-100%)' : undefined,
+            }}
+            role="listbox"
+            aria-labelledby={selectId}
+          >
+            {options.map((opt) => (
+              <li key={opt.value} role="presentation">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={opt.value === value}
+                  disabled={opt.disabled}
+                  className={`${styles.option} ${opt.value === value ? styles.optionActive : ''}`}
+                  onClick={() => !opt.disabled && pick(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              </li>
+            ))}
+          </ul>,
+          document.body
+        )}
     </div>
   );
 

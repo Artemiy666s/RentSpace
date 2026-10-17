@@ -142,7 +142,8 @@ async function getRoomDetails(roomId) {
 
   // Начисления лежат в rent_charges. Если строки нет (сдача до 15-го / снос автогенерации) —
   // один раз дописываем только уже наступивший месяц и читаем уже сохранённую сумму.
-  if (activeLink) {
+  // Пропускаем для свободных — после «Освободить» лишний ensureDue только тормозит UI.
+  if (activeLink && !['free', 'ready_for_rent', 'repair', 'not_available'].includes(room.status)) {
     const organizationId =
       activeLink.organization_id || property?.organization_id || null;
     if (organizationId) {

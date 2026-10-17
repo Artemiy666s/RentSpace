@@ -308,8 +308,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const room = await db('rooms').where({ id: req.params.id }).first();
     const orgId = req.user.organizationId || (await db('properties').where({ id: room.property_id }).first())?.organization_id;
+    const roomId = Number(req.params.id);
     await vacateRoom({
-      roomId: Number(req.params.id),
+      roomId,
       endDate: req.body.endDate,
       reason: req.body.reason,
       newStatus: req.body.newStatus,
@@ -319,7 +320,12 @@ router.post(
       propertyId: room.property_id,
       ip: req.ip,
     });
-    ok(res, await getRoomDetails(req.params.id));
+    // Не тянем getRoomDetails: там ensureDue/тяжёлые JOIN и кнопка «Освободить» зависает.
+    ok(res, {
+      id: roomId,
+      status: req.body.newStatus || 'free',
+      vacated: true,
+    });
   })
 );
 
