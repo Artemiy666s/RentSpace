@@ -177,14 +177,19 @@ router.get(
         (s, [m, x]) => (Number(m) >= debtFrom ? s + Number(x.paid || 0) : s),
         0
       );
-      for (let m = debtFrom; m <= dueThrough; m += 1) {
+      let remaining = roundMoney(row.debt);
+      let last = null;
+      for (let m = dueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
         const charged = Number(row.months?.[m]?.rent || 0);
         const paid = Number(row.months?.[m]?.paid || 0);
-        const debt = roundMoney(Math.max(0, charged - paid));
+        if (charged <= 0.005) continue;
+        if (paid + 0.005 >= charged) break;
+
+        const debt = roundMoney(Math.min(charged, remaining));
         if (debt <= 0.005) continue;
         monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
         if (!contributors[m]) contributors[m] = [];
-        contributors[m].push({
+        const entry = {
           contractId: row.contractId,
           tenantName: row.tenantName,
           contractLabel: row.contractLabel,
@@ -193,7 +198,14 @@ router.get(
           monthPaid: paid,
           contractDebt: roundMoney(row.debt),
           yearPaid: roundMoney(yearPaid),
-        });
+        };
+        contributors[m].push(entry);
+        last = { month: m, entry };
+        remaining = roundMoney(remaining - debt);
+      }
+      if (remaining > 0.005 && last) {
+        last.entry.slice = roundMoney(last.entry.slice + remaining);
+        monthTotals[last.month] = roundMoney((monthTotals[last.month] || 0) + remaining);
       }
     }
 

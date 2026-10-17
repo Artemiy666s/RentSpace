@@ -20,8 +20,63 @@ function roundMoney(value) {
 /**
  * Задолженность по аренде + коммунальные.
  * Итог долга = как в реестре (начислено due − оплаты с июня 2026).
- * Разбивка по месяцам = неоплата именно этого месяца: max(0, начислено − оплаты с меткой месяца).
+ * Разбивка по месяцам: остаток долга кладём с конца периода, но не переносим
+ * через полностью закрытый месяц (оплаты ≥ начисления) — иначе в июне/июле
+ * всплывают чужие хвосты, а в августе — уже оплатившие (Писков и т.п.).
  */
+function allocateDebtByMonth(registerDebt, monthsMap, debtFrom, dueThrough) {
+  let remaining = roundMoney(registerDebt);
+  const months = [];
+  let last = null;
+
+  for (let m = dueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
+    const charged = Number(monthsMap?.[m]?.rent || 0);
+    const paid = Number(monthsMap?.[m]?.paid || 0);
+    if (charged <= 0.005) continue;
+    // Месяц закрыт оплатами с его меткой — дальше в прошлое долг не тянем.
+    if (paid + 0.005 >= charged) break;
+
+    const slice = roundMoney(Math.min(charged, remaining));
+    if (slice <= 0.005) continue;
+    const entry = { month: m, debt: slice };
+    months.push(entry);
+    last = entry;
+    remaining = roundMoney(remaining - slice);
+  }
+
+  // Хвост после «стены» закрытого месяца — к последнему открытому (свежему) месяцу.
+  if (remaining > 0.005 && last) {
+    last.debt = roundMoney(last.debt + remaining);
+  }
+
+  return months;
+}
+
+function allocateUtilDebtByMonth(contractUtilDebt, monthsMap, debtFrom, utilDueThrough) {
+  let remaining = roundMoney(contractUtilDebt);
+  const monthTotals = {};
+  let lastMonth = null;
+
+  for (let m = utilDueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
+    const charged = Number(monthsMap?.[m]?.utility || 0);
+    const paid = Number(monthsMap?.[m]?.utilityPaid || 0);
+    if (charged <= 0.005) continue;
+    if (paid + 0.005 >= charged) break;
+
+    const slice = roundMoney(Math.min(charged, remaining));
+    if (slice <= 0.005) continue;
+    monthTotals[m] = slice;
+    lastMonth = m;
+    remaining = roundMoney(remaining - slice);
+  }
+
+  if (remaining > 0.005 && lastMonth != null) {
+    monthTotals[lastMonth] = roundMoney((monthTotals[lastMonth] || 0) + remaining);
+  }
+
+  return monthTotals;
+}
+
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows =
     registerRowsPreloaded || (await listRentRegister(propertyId, year, null, { ensureCharges: false }));
@@ -35,14 +90,9 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     const registerDebt = roundMoney(row.debt || 0);
     if (registerDebt <= 0.005) continue;
 
-    const months = [];
-    for (let m = debtFrom; m <= dueThrough; m += 1) {
-      const charged = Number(row.months?.[m]?.rent || 0);
-      const paid = Number(row.months?.[m]?.paid || 0);
-      const debt = roundMoney(Math.max(0, charged - paid));
-      if (debt <= 0.005) continue;
-      months.push({ month: m, debt });
-      monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
+    const months = allocateDebtByMonth(registerDebt, row.months, debtFrom, dueThrough);
+    for (const { month, debt } of months) {
+      monthTotals[month] = roundMoney((monthTotals[month] || 0) + debt);
     }
 
     debtBreakdown.push({
@@ -99,12 +149,9 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     if (contractUtilDebt <= 0.005) continue;
     utilityDebt = roundMoney(utilityDebt + contractUtilDebt);
 
-    for (let m = debtFrom; m <= utilDueThrough; m += 1) {
-      const charged = Number(row.months?.[m]?.utility || 0);
-      const paid = Number(row.months?.[m]?.utilityPaid || 0);
-      const monthDebt = roundMoney(Math.max(0, charged - paid));
-      if (monthDebt <= 0.005) continue;
-      utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + monthDebt);
+    const allocated = allocateUtilDebtByMonth(contractUtilDebt, row.months, debtFrom, utilDueThrough);
+    for (const [m, amount] of Object.entries(allocated)) {
+      utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + Number(amount));
     }
   }
 
