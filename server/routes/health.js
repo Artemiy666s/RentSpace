@@ -767,6 +767,24 @@ router.post(
 );
 
 /**
+ * Attach ИП Власенко → Советская 56А / 1 этаж / помещение 5.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-vlasenko-room-attach',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairVlasenkoRoomAttach } = require('../services/vlasenkoRoomAttachRepair');
+    const body = req.body || {};
+    const data = await repairVlasenkoRoomAttach({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Broad payment hunt: by tenant name / amount / year — including wrong tenant_id links.
  */
 router.get(
