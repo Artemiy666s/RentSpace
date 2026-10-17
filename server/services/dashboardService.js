@@ -20,7 +20,7 @@ function roundMoney(value) {
 /**
  * Задолженность по аренде + коммунальные.
  * Итог долга = как в реестре (начислено due − оплаты с июня 2026).
- * Разбивка по месяцам — с конца периода учёта: остаток долга на свежие месяцы.
+ * Разбивка по месяцам = неоплата именно этого месяца: max(0, начислено − оплаты с меткой месяца).
  */
 async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded = null) {
   const registerRows =
@@ -35,17 +35,14 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     const registerDebt = roundMoney(row.debt || 0);
     if (registerDebt <= 0.005) continue;
 
-    let remaining = registerDebt;
     const months = [];
-    for (let m = dueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
+    for (let m = debtFrom; m <= dueThrough; m += 1) {
       const charged = Number(row.months?.[m]?.rent || 0);
-      if (charged <= 0) continue;
-      const slice = Math.min(charged, remaining);
-      const debt = roundMoney(slice);
+      const paid = Number(row.months?.[m]?.paid || 0);
+      const debt = roundMoney(Math.max(0, charged - paid));
       if (debt <= 0.005) continue;
       months.push({ month: m, debt });
       monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
-      remaining = roundMoney(remaining - debt);
     }
 
     debtBreakdown.push({
@@ -102,15 +99,12 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
     if (contractUtilDebt <= 0.005) continue;
     utilityDebt = roundMoney(utilityDebt + contractUtilDebt);
 
-    let remaining = contractUtilDebt;
-    for (let m = utilDueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
+    for (let m = debtFrom; m <= utilDueThrough; m += 1) {
       const charged = Number(row.months?.[m]?.utility || 0);
-      if (charged <= 0) continue;
-      const slice = Math.min(charged, remaining);
-      const monthDebt = roundMoney(slice);
+      const paid = Number(row.months?.[m]?.utilityPaid || 0);
+      const monthDebt = roundMoney(Math.max(0, charged - paid));
       if (monthDebt <= 0.005) continue;
       utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + monthDebt);
-      remaining = roundMoney(remaining - monthDebt);
     }
   }
 
