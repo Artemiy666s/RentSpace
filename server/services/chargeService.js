@@ -129,6 +129,8 @@ async function generateRentCharges({
     const key = `${row.contract_id}:${row.room_id}`;
     if (existingKeys.has(key)) continue;
     if (contractsWithNullRoomCharge.has(Number(row.contract_id))) continue;
+    // rate 0 = occupancy link without billing (e.g. second Mashevsky room).
+    if (Number(row.rate_without_vat || 0) <= 0.0001) continue;
 
     const amounts = calcRentAmount({
       area: row.area,
