@@ -558,6 +558,25 @@ router.post(
 );
 
 /**
+ * Manager note 2026-10-17: Машевский 536.64, МериЛиз 50, Седлер paper areas, БьютиСистем 62.9.
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-note-discrepancies',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairNoteDiscrepancies } = require('../services/noteDiscrepancyRepair');
+    const body = req.body || {};
+    const data = await repairNoteDiscrepancies({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : new Date().getFullYear(),
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Cancel + regenerate rent charges from current open room links.
  * Body: { tenantLike, apply?, year?, propertyId? }
  */
