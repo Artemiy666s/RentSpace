@@ -204,6 +204,11 @@ router.put(
   '/payments/:id',
   requireRoles(...FINANCE_WRITE_ROLES),
   asyncHandler(async (req, res) => {
+    const existing = await db('payments').where({ id: req.params.id }).first();
+    if (!existing) {
+      fail(res, 404, 'payment_not_found');
+      return;
+    }
     await db('payments').where({ id: req.params.id }).update({
       payment_date: req.body.paymentDate,
       amount: req.body.amount,
@@ -211,6 +216,7 @@ router.put(
       comment: req.body.comment,
       updated_at: db.fn.now(),
     });
+    invalidateRentRegisterCache(existing.property_id);
     ok(res, await db('payments').where({ id: req.params.id }).first());
   })
 );
@@ -219,7 +225,13 @@ router.delete(
   '/payments/:id',
   requireRoles(...FINANCE_WRITE_ROLES),
   asyncHandler(async (req, res) => {
+    const existing = await db('payments').where({ id: req.params.id }).first();
+    if (!existing) {
+      fail(res, 404, 'payment_not_found');
+      return;
+    }
     await db('payments').where({ id: req.params.id }).delete();
+    invalidateRentRegisterCache(existing.property_id);
     ok(res, { deleted: true });
   })
 );
