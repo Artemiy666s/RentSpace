@@ -134,24 +134,29 @@ async function buildRentDebtAndUtilities(propertyId, year, registerRowsPreloaded
   }
   utilMonths.sort((a, b) => b.month - a.month);
 
-  // Задолженность по коммуналке — с тем же стартом учёта, что и аренда.
+  // Коммуналка считается отдельно от аренды: у всех с июня 2026 (без исключения Darkwood).
+  const utilDebtFrom = debtLedgerStartMonth(year);
   const utilMonthDebtTotals = {};
   let utilityDebt = 0;
   for (const row of registerRows) {
-    const debtFrom = debtLedgerStartMonthForTenant(year, row.tenantName);
     let dueUtil = 0;
     let utilPaidForDebt = 0;
     for (let m = 1; m <= 12; m++) {
-      if (m >= debtFrom && m <= utilDueThrough) {
+      if (m >= utilDebtFrom && m <= utilDueThrough) {
         dueUtil += Number(row.months?.[m]?.utility || 0);
       }
-      if (m >= debtFrom) utilPaidForDebt += Number(row.months?.[m]?.utilityPaid || 0);
+      if (m >= utilDebtFrom) utilPaidForDebt += Number(row.months?.[m]?.utilityPaid || 0);
     }
     const contractUtilDebt = roundMoney(Math.max(0, dueUtil - utilPaidForDebt));
     if (contractUtilDebt <= 0.005) continue;
     utilityDebt = roundMoney(utilityDebt + contractUtilDebt);
 
-    const allocated = allocateUtilDebtByMonth(contractUtilDebt, row.months, debtFrom, utilDueThrough);
+    const allocated = allocateUtilDebtByMonth(
+      contractUtilDebt,
+      row.months,
+      utilDebtFrom,
+      utilDueThrough
+    );
     for (const [m, amount] of Object.entries(allocated)) {
       utilMonthDebtTotals[m] = roundMoney((utilMonthDebtTotals[m] || 0) + Number(amount));
     }
@@ -364,7 +369,7 @@ async function buildDirectorAnalytics(propertyId, organizationId) {
 async function getManagerDashboard(propertyId, organizationId) {
   const pid = Number(propertyId);
   const oid = organizationId == null ? 0 : Number(organizationId);
-  const cacheKey = `dashboard:v5:${pid}:${oid}`;
+  const cacheKey = `dashboard:v6:${pid}:${oid}`;
 
   return cacheWrap(cacheKey, DASHBOARD_TTL_MS, async () => {
     const today = dayjs().format('YYYY-MM-DD');
