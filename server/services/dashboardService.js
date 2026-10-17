@@ -20,9 +20,10 @@ function roundMoney(value) {
 /**
  * Задолженность по аренде + коммунальные.
  * Итог долга = как в реестре (начислено due − оплаты с июня 2026).
- * Разбивка по месяцам: остаток долга кладём с конца периода, но не переносим
- * через полностью закрытый месяц (оплаты ≥ начисления) — иначе в июне/июле
- * всплывают чужие хвосты, а в августе — уже оплатившие (Писков и т.п.).
+ * Разбивка по месяцам: на каждый месяц кладём его неоплаченный остаток
+ * (начислено − оплаты с меткой месяца), идя с конца периода.
+ * Полностью закрытый месяц пропускаем (не «стена»): иначе хвост июня
+ * у Пискова (644.19) налипал на сентябрь поверх 703.93 → 1348.12.
  */
 function allocateDebtByMonth(registerDebt, monthsMap, debtFrom, dueThrough) {
   let remaining = roundMoney(registerDebt);
@@ -32,11 +33,10 @@ function allocateDebtByMonth(registerDebt, monthsMap, debtFrom, dueThrough) {
   for (let m = dueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
     const charged = Number(monthsMap?.[m]?.rent || 0);
     const paid = Number(monthsMap?.[m]?.paid || 0);
-    if (charged <= 0.005) continue;
-    // Месяц закрыт оплатами с его меткой — дальше в прошлое долг не тянем.
-    if (paid + 0.005 >= charged) break;
+    const unpaid = roundMoney(Math.max(0, charged - paid));
+    if (unpaid <= 0.005) continue;
 
-    const slice = roundMoney(Math.min(charged, remaining));
+    const slice = roundMoney(Math.min(unpaid, remaining));
     if (slice <= 0.005) continue;
     const entry = { month: m, debt: slice };
     months.push(entry);
@@ -44,7 +44,7 @@ function allocateDebtByMonth(registerDebt, monthsMap, debtFrom, dueThrough) {
     remaining = roundMoney(remaining - slice);
   }
 
-  // Хвост после «стены» закрытого месяца — к последнему открытому (свежему) месяцу.
+  // Страховка от копеек / рассинхрона реестра — к самому свежему открытому месяцу.
   if (remaining > 0.005 && last) {
     last.debt = roundMoney(last.debt + remaining);
   }
@@ -60,10 +60,10 @@ function allocateUtilDebtByMonth(contractUtilDebt, monthsMap, debtFrom, utilDueT
   for (let m = utilDueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
     const charged = Number(monthsMap?.[m]?.utility || 0);
     const paid = Number(monthsMap?.[m]?.utilityPaid || 0);
-    if (charged <= 0.005) continue;
-    if (paid + 0.005 >= charged) break;
+    const unpaid = roundMoney(Math.max(0, charged - paid));
+    if (unpaid <= 0.005) continue;
 
-    const slice = roundMoney(Math.min(charged, remaining));
+    const slice = roundMoney(Math.min(unpaid, remaining));
     if (slice <= 0.005) continue;
     monthTotals[m] = slice;
     lastMonth = m;

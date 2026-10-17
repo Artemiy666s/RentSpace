@@ -182,10 +182,10 @@ router.get(
       for (let m = dueThrough; m >= debtFrom && remaining > 0.005; m -= 1) {
         const charged = Number(row.months?.[m]?.rent || 0);
         const paid = Number(row.months?.[m]?.paid || 0);
-        if (charged <= 0.005) continue;
-        if (paid + 0.005 >= charged) break;
+        const unpaid = roundMoney(Math.max(0, charged - paid));
+        if (unpaid <= 0.005) continue;
 
-        const debt = roundMoney(Math.min(charged, remaining));
+        const debt = roundMoney(Math.min(unpaid, remaining));
         if (debt <= 0.005) continue;
         monthTotals[m] = roundMoney((monthTotals[m] || 0) + debt);
         if (!contributors[m]) contributors[m] = [];
