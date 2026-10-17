@@ -515,6 +515,25 @@ router.post(
 );
 
 /**
+ * Энджой: убрать покомнатные начисления рядом с общей 167.7 (задвоение).
+ * Dry-run by default; pass apply=true to write.
+ */
+router.post(
+  '/repair-enjoy-charges',
+  asyncHandler(async (req, res) => {
+    if (!assertRepairKey(req, res)) return;
+    const { repairEnjoyCharges } = require('../services/enjoyChargeRepair');
+    const body = req.body || {};
+    const data = await repairEnjoyCharges({
+      propertyId: body.propertyId ? Number(body.propertyId) : 1,
+      year: body.year ? Number(body.year) : new Date().getFullYear(),
+      dryRun: body.apply !== true && body.dryRun !== false,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * Cancel + regenerate rent charges from current open room links.
  * Body: { tenantLike, apply?, year?, propertyId? }
  */
