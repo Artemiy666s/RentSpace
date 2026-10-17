@@ -43,9 +43,29 @@ async function loadOpenLinks(contractId) {
       'cr.room_id',
       'cr.area',
       'cr.rate_without_vat',
+      'cr.start_date',
+      'cr.end_date',
       'r.room_number',
       'r.area as roomArea',
       'r.rentable_area'
+    )
+    .orderBy('r.room_number');
+}
+
+/** All links on contract (including ended) — needed to stop billing a room that still has end_date in current month. */
+async function loadAllLinks(contractId) {
+  return db('contract_rooms as cr')
+    .join('rooms as r', 'r.id', 'cr.room_id')
+    .where('cr.contract_id', contractId)
+    .select(
+      'cr.id as linkId',
+      'cr.room_id',
+      'cr.area',
+      'cr.rate_without_vat',
+      'cr.start_date',
+      'cr.end_date',
+      'r.room_number',
+      'r.area as roomArea'
     )
     .orderBy('r.room_number');
 }
@@ -125,14 +145,15 @@ async function repairNoteDiscrepancies({ propertyId = 1, year = 2026, dryRun = t
   const y = Number(year) || dayjs().year();
   const report = { dryRun, propertyId: pid, year: y, tenants: [] };
 
-  // ——— Машевский ———
+  // ——— Машевский: только пом. 4 (34.4×13=536.64); пом. 5 не биллить ———
   {
     const actions = [];
     const { tenant, contract } = await findLiveContract('Машевск', pid);
     if (!tenant || !contract) {
       report.tenants.push({ key: 'mashevsky', error: 'not_found' });
     } else {
-      const links = await loadOpenLinks(contract.id);
+      // Include ended links — room 5 may have end_date mid-month but still bills Oct.
+      const links = await loadAllLinks(contract.id);
       actions.push({
         type: 'links_snapshot',
         links: links.map((l) => ({
@@ -141,17 +162,19 @@ async function repairNoteDiscrepancies({ propertyId = 1, year = 2026, dryRun = t
           linkArea: Number(l.area),
           mapArea: Number(l.roomArea),
           rate: Number(l.rate_without_vat),
+          start: l.start_date,
+          end: l.end_date,
         })),
       });
 
       for (const link of links) {
         const n = normRoom(link.room_number);
         if (n === '4') {
-          // Billing area = map room area (34.4), rate 13 → 536.64
           const area = roundArea(Number(link.roomArea || link.area || 34.4));
           actions.push({
             type: 'bill_room',
             room: link.room_number,
+            roomId: link.room_id,
             area,
             rate: 13,
             expected: calcRentAmount({
@@ -172,16 +195,15 @@ async function repairNoteDiscrepancies({ propertyId = 1, year = 2026, dryRun = t
               updated_at: db.fn.now(),
             });
           }
-        } else if (n === '5') {
-          // Keep occupancy on map; do not bill this room for Mashevsky.
+        } else if (n === '5' || Number(link.room_id) === 180132) {
           actions.push({
             type: 'unlink_billing',
             room: link.room_number,
             roomId: link.room_id,
             mapArea: Number(link.roomArea),
-            keepLink: true,
             rate: 0,
             fromRate: Number(link.rate_without_vat),
+            end: link.end_date,
           });
           if (!dryRun) {
             await db('contract_rooms').where({ id: link.linkId }).update({
@@ -189,6 +211,29 @@ async function repairNoteDiscrepancies({ propertyId = 1, year = 2026, dryRun = t
             });
           }
         }
+      }
+
+      const room5Charges = await db('rent_charges')
+        .where({ contract_id: contract.id, period_year: y, room_id: 180132 })
+        .whereNot('status', 'cancelled')
+        .select('id', 'period_month', 'amount_with_vat');
+      actions.push({
+        type: 'cancel_room5_charges',
+        count: room5Charges.length,
+        sum: roundMoney(room5Charges.reduce((s, r) => s + Number(r.amount_with_vat || 0), 0)),
+      });
+      if (!dryRun && room5Charges.length) {
+        await db('rent_charges')
+          .whereIn(
+            'id',
+            room5Charges.map((r) => r.id)
+          )
+          .update({
+            status: 'cancelled',
+            manual_adjustment: true,
+            adjustment_reason: 'note_mashevsky_room5_not_billed',
+            updated_at: db.fn.now(),
+          });
       }
 
       if (!dryRun) {
