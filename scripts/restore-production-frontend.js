@@ -12,7 +12,7 @@ const dest = path.join(root, 'server', 'public');
 const expectedJs = 'index-DGrUP6as.js';
 const expectedCss = 'index-DVDS88w4.css';
 const expectedSha256 =
-  '935D10D8E6FFE418C7D9169498D8A8C61193D7A6DD23A259997E86065701CF37';
+  '011E5F1B729DDE5E6A00D5B359BEB78FB30582DAB14FF4B2A0758571E138ABC2';
 
 function sha256File(filePath) {
   const hash = crypto.createHash('sha256');

@@ -683,7 +683,14 @@ export function MapPage() {
 
             onChangeTenant={() => setChangeTenantModal(true)}
 
-            onVacate={() => setVacateModal(true)}
+            onVacate={() => {
+              setRentError(null);
+              setVacateForm((f) => ({
+                ...f,
+                endDate: f.endDate || new Date().toISOString().slice(0, 10),
+              }));
+              setVacateModal(true);
+            }}
 
             onAddPayment={() => setPaymentModal(true)}
 
@@ -827,7 +834,18 @@ export function MapPage() {
 
         <Input label={t('common.comment')} value={vacateForm.comment} onChange={(e) => setVacateForm({ ...vacateForm, comment: e.target.value })} />
 
-        <Button variant="primary" fullWidth onClick={() => vacateMutation.mutate()}>{t('common.vacate')}</Button>
+        {rentError ? <p className={styles.error}>{rentError}</p> : null}
+        <Button
+          variant="primary"
+          fullWidth
+          disabled={vacateMutation.isPending || !vacateForm.endDate}
+          onClick={() => {
+            setRentError(null);
+            vacateMutation.mutate();
+          }}
+        >
+          {vacateMutation.isPending ? t('common.saving') : t('common.vacate')}
+        </Button>
 
       </Modal>
 

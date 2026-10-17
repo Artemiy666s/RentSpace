@@ -446,23 +446,11 @@ async function vacateRoom({
     .whereNull('c.deleted_at')
     .select('cr.id', 'cr.start_date', 'cr.comment', 'c.id as contract_id', 'c.comment as contract_comment');
 
-  // До закрытия — начислить только по этому помещению за наступившие месяцы
-  if (links.length && organizationId && propertyId) {
-    const fromDate =
-      links
-        .map((l) => l.start_date)
-        .filter(Boolean)
-        .sort()[0] || endDate;
-    for (const link of links) {
-      await ensureDueRentCharges({
-        organizationId,
-        propertyId,
-        fromDate,
-        userId,
-        contractId: link.contract_id,
-        roomId,
-      }).catch(() => {});
-    }
+  // Не ждём ensureDue здесь: полный прогон месяцев вешает кнопку «Освободить»
+  // (Vercel timeout / долгий ответ). Начисления подтянет реестр при следующем открытии.
+
+  if (!endDate) {
+    throw Object.assign(new Error('Укажите дату освобождения'), { status: 400 });
   }
 
   for (const link of links) {
